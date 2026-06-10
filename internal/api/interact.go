@@ -1,0 +1,76 @@
+package api
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/user/miniweb/internal/auth"
+	"github.com/user/miniweb/internal/browser"
+	"github.com/user/miniweb/internal/session"
+)
+
+type interactHandler struct {
+	mgr *session.Manager
+}
+
+type interactRequest struct {
+	SnapshotID int `json:"snapshot_id"`
+	Event      struct {
+		Type      string `json:"type"`
+		ElementID int    `json:"element_id"`
+		Value     string `json:"value"`
+		ScrollX   int    `json:"scroll_x"`
+		ScrollY   int    `json:"scroll_y"`
+	} `json:"event"`
+}
+
+func (h *interactHandler) post(w http.ResponseWriter, r *http.Request) {
+	sessID := chi.URLParam(r, "sessionID")
+	tabID := chi.URLParam(r, "tabID")
+	userID := auth.UserIDFromContext(r.Context())
+
+	sess, err := h.mgr.GetSession(sessID, userID)
+	if err != nil {
+		writeError(w, err.Error(), statusForSessionErr(err))
+		return
+	}
+
+	var req interactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	event := browser.InteractionEvent{
+		Type:      req.Event.Type,
+		ElementID: req.Event.ElementID,
+		Value:     req.Event.Value,
+		ScrollX:   req.Event.ScrollX,
+		ScrollY:   req.Event.ScrollY,
+	}
+
+	if err := h.mgr.Interact(sess, tabID, event); err != nil {
+		writeError(w, err.Error(), statusForSessionErr(err))
+		return
+	}
+
+	// Re-snapshot to get the new state and return a new snapshot ID.
+	// Client can then use the returned snapshot directly.
+	snap, err := h.mgr.Snapshot(sess, tabID, browser.SnapshotOptions{
+		Format: "minidom-text",
+	})
+	if err != nil {
+		// Interaction succeeded but snapshot failed; return ok with no new snap.
+		writeJSON(w, map[string]interface{}{"ok": true})
+		return
+	}
+
+	writeJSON(w, map[string]interface{}{
+		"ok":          true,
+		"snapshot_id": snap.SnapshotID,
+		"url":         snap.URL,
+		"title":       snap.Title,
+		"snapshot":    snap,
+	})
+}

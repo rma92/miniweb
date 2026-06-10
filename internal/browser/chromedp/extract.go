@@ -1,0 +1,295 @@
+package chromedp
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/chromedp/chromedp"
+	"github.com/user/miniweb/internal/minidom"
+)
+
+// jsExtractor is injected into the page and walks the live DOM post-render.
+// It returns a JSON object with {title, url, nodes} where each node has
+// id, type, parentId, text, attrs, layout, style, and interaction fields.
+const jsExtractor = `(function() {
+try {
+  var interactionCounter = 1;
+  var nodeCounter = 1;
+  var nodes = [];
+  var nodeMap = new Map(); // element -> nodeId
+
+  function classifyTag(el) {
+    var tag = el.tagName ? el.tagName.toLowerCase() : '';
+    if (/^h[1-6]$/.test(tag)) return 'HEADING';
+    switch (tag) {
+      case 'a':        return 'LINK';
+      case 'img':      return 'IMAGE';
+      case 'button':   return 'BUTTON';
+      case 'input':    return 'INPUT';
+      case 'textarea': return 'TEXTAREA';
+      case 'select':   return 'SELECT';
+      case 'option':   return 'OPTION';
+      case 'form':     return 'FORM';
+      case 'table':    return 'TABLE';
+      case 'tr':       return 'TABLE_ROW';
+      case 'td': case 'th': return 'TABLE_CELL';
+      case 'ul': case 'ol': return 'LIST';
+      case 'li':       return 'LIST_ITEM';
+      case 'canvas':   return 'CANVAS_FALLBACK';
+      case 'span': case 'em': case 'strong': case 'b': case 'i':
+      case 'code': case 'small': case 'label': return 'INLINE';
+      case 'p': case 'div': case 'section': case 'article':
+      case 'main': case 'header': case 'footer': case 'nav':
+      case 'aside': case 'figure': case 'figcaption':
+      case 'blockquote': case 'pre': return 'BLOCK';
+      case 'body': case 'html': return 'SECTION';
+      default: return null; // skip unknown non-semantic tags
+    }
+  }
+
+  function isVisible(el) {
+    try {
+      var cs = window.getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+      var r = el.getBoundingClientRect();
+      // include elements with zero size only if they contain text or are interactive
+      return true;
+    } catch(e) { return false; }
+  }
+
+  function getLayout(el) {
+    try {
+      var r = el.getBoundingClientRect();
+      var scrollX = window.scrollX || 0;
+      var scrollY = window.scrollY || 0;
+      return {x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY),
+              w: Math.round(r.width), h: Math.round(r.height)};
+    } catch(e) { return null; }
+  }
+
+  function getStyle(el) {
+    try {
+      var cs = window.getComputedStyle(el);
+      return {
+        color: cs.color || '',
+        bg_color: cs.backgroundColor || '',
+        font_size: cs.fontSize || '',
+        font_weight: cs.fontWeight || '',
+        display: cs.display || ''
+      };
+    } catch(e) { return null; }
+  }
+
+  function getInteraction(el, nodeType) {
+    var tag = el.tagName ? el.tagName.toLowerCase() : '';
+    var isMeta = {kind:'', hint:''};
+
+    if (nodeType === 'LINK') {
+      isMeta = {kind:'link', hint:'click'};
+    } else if (nodeType === 'BUTTON' || (tag === 'input' && el.type === 'submit')) {
+      isMeta = {kind:'button', hint:'click'};
+    } else if (nodeType === 'INPUT') {
+      isMeta = {kind:'input', hint:'type'};
+    } else if (nodeType === 'TEXTAREA') {
+      isMeta = {kind:'textarea', hint:'type'};
+    } else if (nodeType === 'SELECT') {
+      isMeta = {kind:'select', hint:'change'};
+    } else if (nodeType === 'FORM') {
+      isMeta = {kind:'form', hint:'submit'};
+    } else {
+      return null;
+    }
+
+    var formId = 0;
+    if (el.form) {
+      formId = nodeMap.get(el.form) || 0;
+    }
+
+    var meta = {
+      element_id: interactionCounter++,
+      kind: isMeta.kind,
+      enabled: !el.disabled,
+      readonly: !!el.readOnly,
+      action_hint: isMeta.hint,
+      form_id: formId,
+      input_type: el.type || '',
+      name: el.name || ''
+    };
+    if (nodeType === 'LINK') meta.href = el.href || el.getAttribute('href') || '';
+    if (nodeType === 'INPUT' || nodeType === 'TEXTAREA' || nodeType === 'SELECT') {
+      meta.value = el.value || '';
+      meta.placeholder = el.placeholder || '';
+    }
+    return meta;
+  }
+
+  function getText(el, nodeType) {
+    if (nodeType === 'IMAGE') return el.alt || '';
+    // For block/inline containers, only grab direct text content to avoid duplication
+    var text = '';
+    el.childNodes.forEach(function(child) {
+      if (child.nodeType === 3) { // TEXT_NODE
+        var t = child.textContent.trim();
+        if (t) text += (text ? ' ' : '') + t;
+      }
+    });
+    return text;
+  }
+
+  function getAttrs(el, nodeType) {
+    var attrs = {};
+    if (nodeType === 'IMAGE') {
+      var src = el.src || el.getAttribute('src') || el.currentSrc || '';
+      if (src) attrs.src = src;
+      var w = el.naturalWidth || el.width;
+      var h = el.naturalHeight || el.height;
+      if (w) attrs.width = String(w);
+      if (h) attrs.height = String(h);
+    }
+    if (nodeType === 'INPUT') {
+      attrs.type = el.type || 'text';
+    }
+    if (nodeType === 'FORM') {
+      attrs.action = el.action || '';
+      attrs.method = el.method || 'get';
+    }
+    return Object.keys(attrs).length ? attrs : null;
+  }
+
+  function processElement(el, parentId) {
+    if (el.nodeType !== 1) return; // only Element nodes
+    if (!isVisible(el)) return;
+
+    var nodeType = classifyTag(el);
+    if (!nodeType) return;
+
+    var id = nodeCounter++;
+    nodeMap.set(el, id);
+
+    var node = {
+      id: id,
+      type: nodeType,
+      parent_id: parentId,
+      text: getText(el, nodeType),
+      layout: getLayout(el),
+      style: getStyle(el)
+    };
+
+    var interaction = getInteraction(el, nodeType);
+    if (interaction) node.interaction = interaction;
+
+    var attrs = getAttrs(el, nodeType);
+    if (attrs) node.attrs = attrs;
+
+    nodes.push(node);
+
+    // Recurse into children (skip image/input/textarea internals)
+    if (nodeType !== 'IMAGE' && nodeType !== 'INPUT' && nodeType !== 'TEXTAREA') {
+      el.childNodes.forEach(function(child) {
+        if (child.nodeType === 1) processElement(child, id);
+      });
+    }
+  }
+
+  // Start from document root
+  var root = {id: nodeCounter++, type: 'DOCUMENT', parent_id: 0, children: []};
+  nodes.push(root);
+  nodeMap.set(document.documentElement, root.id);
+
+  document.body && document.body.childNodes.forEach(function(child) {
+    if (child.nodeType === 1) processElement(child, root.id);
+  });
+
+  return JSON.stringify({
+    title: document.title || '',
+    url: window.location.href || '',
+    nodes: nodes
+  });
+} catch(e) {
+  return JSON.stringify({title:'', url: window.location.href || '', nodes:[], error: String(e)});
+}
+})()`
+
+// rawNode is the raw JSON structure returned by the JS extractor.
+type rawNode struct {
+	ID          int                `json:"id"`
+	Type        string             `json:"type"`
+	ParentID    int                `json:"parent_id"`
+	Text        string             `json:"text"`
+	Layout      *minidom.LayoutBox `json:"layout"`
+	Style       *minidom.StyleSubset `json:"style"`
+	Interaction *minidom.InteractionMeta `json:"interaction"`
+	Attrs       map[string]string  `json:"attrs"`
+}
+
+type extractResult struct {
+	Title string    `json:"title"`
+	URL   string    `json:"url"`
+	Nodes []rawNode `json:"nodes"`
+	Error string    `json:"error"`
+}
+
+// ExtractPage navigates to url using the provided chromedp context and
+// returns a MiniDOM PageSnapshot by injecting the JS extractor.
+func ExtractPage(ctx context.Context, url string) (*minidom.PageSnapshot, error) {
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(url),
+		chromedp.WaitReady("body", chromedp.ByQuery),
+	); err != nil {
+		return nil, fmt.Errorf("navigate %s: %w", url, err)
+	}
+	return extractCurrent(ctx)
+}
+
+// ExtractCurrent runs the JS extractor on whatever page is currently loaded.
+func ExtractCurrent(ctx context.Context) (*minidom.PageSnapshot, error) {
+	return extractCurrent(ctx)
+}
+
+// extractCurrent runs the JS extractor on whatever page is currently loaded.
+func extractCurrent(ctx context.Context) (*minidom.PageSnapshot, error) {
+	var raw string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(jsExtractor, &raw)); err != nil {
+		return nil, fmt.Errorf("js extractor: %w", err)
+	}
+
+	var result extractResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		return nil, fmt.Errorf("parse extractor output: %w", err)
+	}
+
+	nodes := make([]minidom.Node, 0, len(result.Nodes))
+	for _, rn := range result.Nodes {
+		n := minidom.Node{
+			ID:          rn.ID,
+			Type:        minidom.NodeType(rn.Type),
+			ParentID:    rn.ParentID,
+			Text:        rn.Text,
+			Layout:      rn.Layout,
+			Style:       rn.Style,
+			Interaction: rn.Interaction,
+			Attrs:       rn.Attrs,
+		}
+		nodes = append(nodes, n)
+	}
+
+	// Build children lists from parent IDs.
+	idxByID := make(map[int]int, len(nodes))
+	for i, n := range nodes {
+		idxByID[n.ID] = i
+	}
+	for _, n := range nodes {
+		if n.ParentID != 0 {
+			if pi, ok := idxByID[n.ParentID]; ok {
+				nodes[pi].Children = append(nodes[pi].Children, n.ID)
+			}
+		}
+	}
+
+	return &minidom.PageSnapshot{
+		URL:   result.URL,
+		Title: result.Title,
+		Nodes: nodes,
+	}, nil
+}

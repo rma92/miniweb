@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MiniNext</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="btn-back" title="Back" disabled>&#8592;</button>
+  <button id="btn-forward" title="Forward" disabled>&#8594;</button>
+  <button id="btn-reload" title="Reload">&#8635;</button>
+  <input id="address-bar" type="url" placeholder="Enter URL…" spellcheck="false" autocomplete="off">
+  <button id="btn-go">Go</button>
+  <button id="btn-settings" title="Settings">&#9881;</button>
+</div>
+
+<div id="tab-bar">
+  <div id="tab-list"></div>
+  <button id="btn-new-tab" title="New tab">+</button>
+</div>
+
+<div id="status-bar">Connecting…</div>
+
+<div id="page-wrapper">
+  <div id="page-viewport">
+    <div id="page-content"></div>
+  </div>
+  <div id="loading-overlay">Loading&hellip;</div>
+</div>
+
+<!-- Settings panel (hidden by default) -->
+<div id="settings-panel" class="hidden">
+  <div id="settings-header">
+    <span>Settings</span>
+    <button id="btn-settings-close">&times;</button>
+  </div>
+  <div id="settings-body">
+    <label>Server endpoint
+      <input id="set-endpoint" type="url" placeholder="https://mininext.example.com">
+    </label>
+    <label>Auth token
+      <input id="set-token" type="password" placeholder="Bearer token">
+    </label>
+    <label>Image quality
+      <select id="set-quality">
+        <option value="high">High</option>
+        <option value="medium" selected>Medium</option>
+        <option value="low">Low</option>
+      </select>
+    </label>
+    <label>Image format
+      <select id="set-format">
+        <option value="jpeg" selected>JPEG</option>
+        <option value="webp">WebP</option>
+        <option value="png">PNG</option>
+        <option value="gif">GIF</option>
+      </select>
+    </label>
+    <label>Page format
+      <select id="set-page-format">
+        <option value="minidom-text" selected>MiniDOM Text (JSON)</option>
+        <option value="mbpf">MBPF (binary)</option>
+      </select>
+    </label>
+    <label>Device profile
+      <select id="set-device">
+        <option value="phone-modern" selected>Phone (modern)</option>
+        <option value="phone-small">Phone (small)</option>
+        <option value="tablet">Tablet</option>
+        <option value="desktop-small">Desktop (small)</option>
+        <option value="desktop-large">Desktop (large)</option>
+      </select>
+    </label>
+    <div class="settings-actions">
+      <button id="btn-settings-save">Save</button>
+      <button id="btn-clear-session">Clear session</button>
+    </div>
+    <div id="settings-status"></div>
+  </div>
+</div>
+
+<script src="/js/mbpf.js"></script>
+<script src="/js/settings.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/renderer.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

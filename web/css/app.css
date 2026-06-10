@@ -1,0 +1,307 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  background: #f0f0f0;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---- Toolbar ---- */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: #2c2c2c;
+  flex-shrink: 0;
+}
+
+#toolbar button {
+  background: #444;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 5px 9px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+#toolbar button:hover { background: #555; }
+#toolbar button:disabled { opacity: 0.4; cursor: default; }
+
+#address-bar {
+  flex: 1;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  background: #1a1a1a;
+  color: #eee;
+  outline: none;
+}
+#address-bar:focus { background: #111; }
+
+/* ---- Tab bar ---- */
+#tab-bar {
+  display: flex;
+  align-items: center;
+  background: #222;
+  border-bottom: 1px solid #111;
+  flex-shrink: 0;
+  overflow: hidden;
+  min-height: 30px;
+}
+
+#tab-list {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+#tab-list::-webkit-scrollbar { display: none; }
+
+.tab-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  min-width: 80px;
+  max-width: 180px;
+  cursor: pointer;
+  background: #333;
+  border-right: 1px solid #111;
+  color: #aaa;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.tab-pill:hover { background: #3a3a3a; color: #ddd; }
+.tab-pill.active { background: #fff; color: #000; }
+
+.tab-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.6;
+}
+.tab-close:hover { opacity: 1; }
+
+#btn-new-tab {
+  background: #333;
+  color: #aaa;
+  border: none;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+#btn-new-tab:hover { background: #3a3a3a; color: #fff; }
+
+/* ---- Status bar ---- */
+#status-bar {
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #aaa;
+  background: #2c2c2c;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#status-bar.loading { color: #7bf; }
+#status-bar.error { color: #f77; }
+
+/* ---- Page area ---- */
+#page-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#page-viewport {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #fff;
+  padding: 8px 12px;
+}
+
+#loading-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255,255,255,0.75);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #555;
+}
+#loading-overlay.visible { display: flex; }
+
+/* ---- Settings panel ---- */
+#settings-panel {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 320px;
+  background: #fff;
+  border-left: 1px solid #ccc;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  box-shadow: -4px 0 16px rgba(0,0,0,0.15);
+}
+#settings-panel.hidden { display: none; }
+
+#settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #2c2c2c;
+  color: #fff;
+  font-weight: bold;
+}
+#btn-settings-close {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+#settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#settings-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #444;
+}
+
+#settings-body input,
+#settings-body select {
+  padding: 5px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.settings-actions button {
+  flex: 1;
+  padding: 7px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+#btn-settings-save {
+  background: #0066cc;
+  color: #fff;
+}
+#btn-settings-save:hover { background: #0055bb; }
+
+#btn-clear-session {
+  background: #e44;
+  color: #fff;
+}
+#btn-clear-session:hover { background: #c33; }
+
+#settings-status {
+  font-size: 12px;
+  color: #080;
+  min-height: 18px;
+}
+
+/* ---- MiniDOM rendered content ---- */
+.mn-document { max-width: 900px; margin: 0 auto; }
+
+.mn-heading { font-weight: bold; margin: 0.6em 0 0.3em; line-height: 1.3; }
+.mn-heading[data-level="1"] { font-size: 1.6em; }
+.mn-heading[data-level="2"] { font-size: 1.4em; }
+.mn-heading[data-level="3"] { font-size: 1.2em; }
+.mn-heading[data-level="4"],
+.mn-heading[data-level="5"],
+.mn-heading[data-level="6"] { font-size: 1em; }
+
+.mn-block  { margin: 0.4em 0; }
+.mn-section { margin: 0.4em 0; }
+.mn-inline { display: inline; }
+
+.mn-link {
+  color: #0066cc;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.mn-link:hover { color: #004499; }
+
+.mn-image {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 4px 0;
+}
+
+.mn-button {
+  display: inline-block;
+  background: #e8e8e8;
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  margin: 2px;
+}
+.mn-button:hover { background: #d8d8d8; }
+
+.mn-input, .mn-textarea, .mn-select {
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-size: 13px;
+  margin: 2px;
+}
+.mn-input { width: 200px; max-width: 100%; }
+.mn-textarea { width: 100%; min-height: 60px; resize: vertical; }
+.mn-select { min-width: 100px; }
+
+.mn-form { margin: 8px 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+
+.mn-table { border-collapse: collapse; margin: 8px 0; max-width: 100%; }
+.mn-table-cell { border: 1px solid #ddd; padding: 4px 8px; vertical-align: top; }
+
+.mn-list { padding-left: 20px; margin: 4px 0; }
+.mn-list-item { margin: 2px 0; }
