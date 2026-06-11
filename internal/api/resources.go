@@ -33,6 +33,17 @@ func (h *resourcesHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resource IDs are stable per snapshot, so use the ID as an ETag.
+	etag := `"` + resourceID + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+
+	// Respond 304 if client already has this resource.
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	// Return cached inline data if available.
 	if len(res.InlineData) > 0 {
 		mimeType := res.MIMEType
@@ -40,7 +51,6 @@ func (h *resourcesHandler) get(w http.ResponseWriter, r *http.Request) {
 			mimeType = "application/octet-stream"
 		}
 		w.Header().Set("Content-Type", mimeType)
-		w.Header().Set("Cache-Control", "public, max-age=300")
 		w.Write(res.InlineData)
 		return
 	}
@@ -69,6 +79,5 @@ func (h *resourcesHandler) get(w http.ResponseWriter, r *http.Request) {
 	res.MIMEType = mimeType
 
 	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Cache-Control", "public, max-age=300")
 	w.Write(data)
 }

@@ -86,6 +86,16 @@
       pill.dataset.idx = String(idx);
       pill.title = tab.url || '';
 
+      if (tab.faviconURL) {
+        const fav = document.createElement('img');
+        fav.className = 'tab-favicon';
+        fav.src = tab.faviconURL;
+        fav.width = 16;
+        fav.height = 16;
+        fav.onerror = () => { fav.style.display = 'none'; };
+        pill.appendChild(fav);
+      }
+
       const label = document.createElement('span');
       label.className = 'tab-label';
       label.textContent = tab.title || tab.url || 'New tab';
@@ -109,6 +119,7 @@
       tabID: data.tab_id,
       url: url || '',
       title: url ? '…' : 'New tab',
+      faviconURL: '',
       snapID: 0,
       snap: null,
       history: url ? [url] : [],
@@ -203,8 +214,9 @@
         tab.historyIdx = tab.history.length - 1;
       }
 
-      tab.url   = newURL;
-      tab.title = snap.title || newURL;
+      tab.url        = newURL;
+      tab.title      = snap.title || newURL;
+      tab.faviconURL = snap.favicon_url || tab.faviconURL;
       addressBar.value = newURL;
       document.title = (snap.title || 'MiniNext') + ' — MiniNext';
       updateNavButtons();
@@ -253,8 +265,9 @@
           tab.historyIdx = tab.history.length - 1;
         }
 
-        tab.url   = newURL;
-        tab.title = snap.title || newURL;
+        tab.url        = newURL;
+        tab.title      = snap.title || newURL;
+        tab.faviconURL = snap.favicon_url || tab.faviconURL;
         addressBar.value = newURL;
         document.title = (snap.title || 'MiniNext') + ' — MiniNext';
         updateNavButtons();
@@ -278,6 +291,7 @@
     document.getElementById('set-format').value      = s.imageFormat || 'jpeg';
     document.getElementById('set-page-format').value = s.pageFormat || 'minidom-text';
     document.getElementById('set-device').value      = s.deviceProfile || 'phone-modern';
+    document.getElementById('set-rendering').value   = s.renderingProfile || 'box';
     settingsPanel.classList.remove('hidden');
     settingsStatus.textContent = '';
   }
@@ -288,8 +302,9 @@
     s.authToken     = document.getElementById('set-token').value.trim();
     s.imageQuality  = document.getElementById('set-quality').value;
     s.imageFormat   = document.getElementById('set-format').value;
-    s.pageFormat    = document.getElementById('set-page-format').value;
-    s.deviceProfile = document.getElementById('set-device').value;
+    s.pageFormat        = document.getElementById('set-page-format').value;
+    s.deviceProfile     = document.getElementById('set-device').value;
+    s.renderingProfile  = document.getElementById('set-rendering').value;
     Settings.save(s);
     settingsStatus.textContent = 'Saved.';
     setTimeout(() => { settingsStatus.textContent = ''; }, 2000);

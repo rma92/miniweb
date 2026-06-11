@@ -39,14 +39,19 @@ func (h *snapshotHandler) get(w http.ResponseWriter, r *http.Request) {
 	} else if strings.Contains(accept, "application/minidom+json") || h.cfg.Encoding.AllowMinidomText {
 		format = "minidom-text"
 	}
-	// Query param override for easy debugging.
 	if q := r.URL.Query().Get("format"); q != "" {
 		format = q
 	}
 
+	// Rendering profile: "box" (default, full DOM) or "flow" (linearized).
+	renderingProfile := "box"
+	if q := r.URL.Query().Get("rendering"); q == "flow" || q == "box" {
+		renderingProfile = q
+	}
+
 	opts := browser.SnapshotOptions{
 		Format:           format,
-		RenderingProfile: "box",
+		RenderingProfile: renderingProfile,
 		ImageFormat:      h.cfg.Images.DefaultFormat,
 		ImageQuality:     h.cfg.Images.DefaultQuality,
 	}
@@ -73,11 +78,8 @@ func (h *snapshotHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Negotiate and apply compression.
-	allowed := []string{compress.AlgoGzip}
-	if h.cfg.Encoding.DefaultCompression == "brotli" || strings.Contains(h.cfg.Encoding.DefaultCompression, "brotli") {
-		allowed = append(allowed, compress.AlgoBrotli)
-	}
+	// Always offer both gzip and brotli; negotiate based on client's Accept-Encoding.
+	allowed := []string{compress.AlgoGzip, compress.AlgoBrotli}
 	algo := compress.Negotiate(r.Header.Get("Accept-Encoding"), allowed)
 
 	if algo != compress.AlgoNone {

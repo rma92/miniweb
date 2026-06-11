@@ -11,6 +11,151 @@ import (
 	"github.com/user/miniweb/internal/minidom"
 )
 
+// jsFavicon extracts the page's best favicon URL.
+const jsFavicon = `(function() {
+  var icons = document.querySelectorAll('link[rel~="icon"], link[rel~="shortcut"]');
+  var best = '';
+  var bestSize = 0;
+  icons.forEach(function(l) {
+    var href = l.href || l.getAttribute('href') || '';
+    if (!href) return;
+    var sizes = l.getAttribute('sizes') || '';
+    var sz = 0;
+    var m = sizes.match(/(\d+)/);
+    if (m) sz = parseInt(m[1], 10);
+    if (sz > bestSize || !best) { best = href; bestSize = sz; }
+  });
+  if (!best) {
+    // fallback: try /favicon.ico relative to origin
+    best = window.location.origin + '/favicon.ico';
+  }
+  return best;
+})()`
+
+// jsFlowExtractor linearizes page content into a flat reading-order list.
+// It emits only semantic content nodes: document root, headings, paragraphs,
+// links, images, list items, and blockquotes — stripping layout/chrome noise.
+const jsFlowExtractor = `(function() {
+try {
+  var interactionCounter = 1;
+  var nodeCounter = 1;
+  var nodes = [];
+
+  function getLayout(el) {
+    try {
+      var r = el.getBoundingClientRect();
+      return {x: Math.round(r.left), y: Math.round(r.top + window.scrollY),
+              w: Math.round(r.width), h: Math.round(r.height)};
+    } catch(e) { return null; }
+  }
+
+  function isVisible(el) {
+    try {
+      var cs = window.getComputedStyle(el);
+      return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0';
+    } catch(e) { return false; }
+  }
+
+  function collectText(el) {
+    return (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 512);
+  }
+
+  var root = {id: nodeCounter++, type: 'DOCUMENT', parent_id: 0};
+  nodes.push(root);
+
+  function walk(el, depth) {
+    if (!el || el.nodeType !== 1) return;
+    if (!isVisible(el)) return;
+    if (depth > 20) return;
+
+    var tag = (el.tagName || '').toLowerCase();
+    var type = null;
+    var node = null;
+
+    if (/^h[1-6]$/.test(tag)) {
+      type = 'HEADING';
+      var text = collectText(el);
+      if (!text) return;
+      node = {id: nodeCounter++, type: type, parent_id: root.id,
+              text: text, layout: getLayout(el)};
+      var px = parseFloat(window.getComputedStyle(el).fontSize) || 16;
+      node.style = {font_size: px + 'px', font_weight: '700'};
+
+    } else if (tag === 'p' || tag === 'blockquote') {
+      var text = collectText(el);
+      if (!text) return;
+      node = {id: nodeCounter++, type: 'BLOCK', parent_id: root.id,
+              text: text, layout: getLayout(el)};
+
+    } else if (tag === 'img') {
+      var src = el.src || el.getAttribute('src') || el.currentSrc || '';
+      if (!src) return;
+      var attrs = {src: src};
+      var w = el.naturalWidth || el.width;
+      var h = el.naturalHeight || el.height;
+      if (w) attrs.width = String(w);
+      if (h) attrs.height = String(h);
+      node = {id: nodeCounter++, type: 'IMAGE', parent_id: root.id,
+              text: el.alt || '', layout: getLayout(el), attrs: attrs};
+
+    } else if (tag === 'a') {
+      var text = collectText(el);
+      if (!text) return;
+      var href = el.href || el.getAttribute('href') || '';
+      node = {id: nodeCounter++, type: 'LINK', parent_id: root.id,
+              text: text, layout: getLayout(el),
+              interaction: {element_id: interactionCounter++, kind: 'link',
+                            enabled: true, href: href, action_hint: 'click'}};
+
+    } else if (tag === 'li') {
+      var text = collectText(el);
+      if (!text) return;
+      node = {id: nodeCounter++, type: 'LIST_ITEM', parent_id: root.id,
+              text: text, layout: getLayout(el)};
+
+    } else if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') {
+      // Keep interactive elements in flow mode.
+      var itype = el.type || '';
+      if (itype === 'hidden') return;
+      var ntype = tag === 'input' ? 'INPUT'
+               : tag === 'textarea' ? 'TEXTAREA'
+               : tag === 'select' ? 'SELECT' : 'BUTTON';
+      var kind = ntype.toLowerCase();
+      var hint = (tag === 'button' || itype === 'submit') ? 'click' : 'type';
+      node = {id: nodeCounter++, type: ntype, parent_id: root.id,
+              text: collectText(el), layout: getLayout(el),
+              interaction: {element_id: interactionCounter++, kind: kind,
+                            enabled: !el.disabled, readonly: !!el.readOnly,
+                            value: el.value || '', placeholder: el.placeholder || '',
+                            action_hint: hint, input_type: itype, name: el.name || ''}};
+    }
+
+    if (node) {
+      nodes.push(node);
+    } else {
+      // Recurse into containers.
+      el.childNodes.forEach(function(c) { walk(c, depth + 1); });
+      return;
+    }
+
+    // Don't recurse into content nodes (we already grabbed their text).
+    if (type !== 'HEADING' && tag !== 'p' && tag !== 'blockquote' && tag !== 'li') {
+      el.childNodes.forEach(function(c) { walk(c, depth + 1); });
+    }
+  }
+
+  document.body && document.body.childNodes.forEach(function(c) { walk(c, 0); });
+
+  return JSON.stringify({
+    title: document.title || '',
+    url: window.location.href || '',
+    nodes: nodes
+  });
+} catch(e) {
+  return JSON.stringify({title:'', url: window.location.href || '', nodes:[], error: String(e)});
+}
+})()`
+
 // jsExtractor is injected into the page and walks the live DOM post-render.
 // It returns a JSON object with {title, url, nodes} where each node has
 // id, type, parentId, text, attrs, layout, style, and interaction fields.
@@ -249,10 +394,19 @@ func ExtractCurrent(ctx context.Context) (*minidom.PageSnapshot, error) {
 	return extractCurrent(ctx)
 }
 
-// extractCurrent runs the JS extractor on whatever page is currently loaded.
+// ExtractCurrentFlow runs the flow-mode extractor (linearized reading order).
+func ExtractCurrentFlow(ctx context.Context) (*minidom.PageSnapshot, error) {
+	return extractCurrentWithJS(ctx, jsFlowExtractor)
+}
+
 func extractCurrent(ctx context.Context) (*minidom.PageSnapshot, error) {
+	return extractCurrentWithJS(ctx, jsExtractor)
+}
+
+// extractCurrentWithJS runs the given JS extractor string on the current page.
+func extractCurrentWithJS(ctx context.Context, jsCode string) (*minidom.PageSnapshot, error) {
 	var raw string
-	if err := chromedp.Run(ctx, chromedp.Evaluate(jsExtractor, &raw)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Evaluate(jsCode, &raw)); err != nil {
 		return nil, fmt.Errorf("js extractor: %w", err)
 	}
 
@@ -332,10 +486,15 @@ func extractCurrent(ctx context.Context) (*minidom.PageSnapshot, error) {
 		}
 	}
 
+	// Extract favicon URL (best-effort; ignore errors).
+	var faviconURL string
+	_ = chromedp.Run(ctx, chromedp.Evaluate(jsFavicon, &faviconURL))
+
 	return &minidom.PageSnapshot{
-		URL:       result.URL,
-		Title:     result.Title,
-		Nodes:     nodes,
-		Resources: resources,
+		URL:        result.URL,
+		Title:      result.Title,
+		FaviconURL: faviconURL,
+		Nodes:      nodes,
+		Resources:  resources,
 	}, nil
 }

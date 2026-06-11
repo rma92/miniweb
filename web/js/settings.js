@@ -13,6 +13,7 @@ window.Settings = (function() {
     compression: 'server-default',
     deviceProfile: 'phone-modern',
     pageFormat: 'minidom-text',  // 'minidom-text' or 'mbpf'
+    renderingProfile: 'box',     // 'box' (full DOM) or 'flow' (linearized)
   };
 
   function get() {

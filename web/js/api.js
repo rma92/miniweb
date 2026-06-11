@@ -76,8 +76,9 @@ window.MiniAPI = (function() {
     }
     headers['Accept-Encoding'] = 'gzip, br';
 
+    const rendering = s.renderingProfile || 'box';
     const res = await fetch(
-      `${base}/api/v1/sessions/${sessionID}/tabs/${tabID}/snapshot`,
+      `${base}/api/v1/sessions/${sessionID}/tabs/${tabID}/snapshot?rendering=${rendering}`,
       { headers }
     );
     if (!res.ok) {

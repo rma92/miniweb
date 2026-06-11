@@ -90,6 +90,7 @@ type PageSnapshot struct {
 	SnapshotID int           `json:"snapshot_id"`
 	URL        string        `json:"url"`
 	Title      string        `json:"title"`
+	FaviconURL string        `json:"favicon_url,omitempty"`
 	Nodes      []Node        `json:"nodes"`
 	Resources  []ResourceRef `json:"resources,omitempty"`
 }

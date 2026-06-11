@@ -83,6 +83,13 @@ body {
 .tab-pill:hover { background: #3a3a3a; color: #ddd; }
 .tab-pill.active { background: #fff; color: #000; }
 
+.tab-favicon {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 .tab-label {
   flex: 1;
   overflow: hidden;

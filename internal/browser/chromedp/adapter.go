@@ -171,13 +171,18 @@ func (w *Worker) Interact(tab browser.TabHandle, event browser.InteractionEvent)
 }
 
 // Snapshot extracts the current rendered state of the tab.
-func (w *Worker) Snapshot(tab browser.TabHandle, _ browser.SnapshotOptions) (*minidom.PageSnapshot, error) {
+func (w *Worker) Snapshot(tab browser.TabHandle, opts browser.SnapshotOptions) (*minidom.PageSnapshot, error) {
 	t, sess, err := w.getTab(tab)
 	if err != nil {
 		return nil, err
 	}
 
-	snap, err := extractCurrent(t.ctx)
+	var snap *minidom.PageSnapshot
+	if opts.RenderingProfile == "flow" {
+		snap, err = ExtractCurrentFlow(t.ctx)
+	} else {
+		snap, err = extractCurrent(t.ctx)
+	}
 	if err != nil {
 		return nil, err
 	}

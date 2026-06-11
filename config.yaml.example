@@ -1,0 +1,34 @@
+# MiniNext configuration file.
+# Copy to config.yaml and edit as needed. Environment variables override file values.
+
+server:
+  listen: ":8080"
+  https_enabled: false
+  # cert_file: "/etc/mininext/tls.crt"
+  # key_file:  "/etc/mininext/tls.key"
+
+auth:
+  enabled: false
+  # static_token: "your-secret-token-here"
+
+browser:
+  engine: "chromium"
+  # chromium_path: "/usr/bin/chromium"
+  worker_pool_min: 1
+  worker_pool_max: 4
+  headless: true
+
+session:
+  idle_timeout: "10m"
+  max_tabs: 10
+
+encoding:
+  default_page_format: "minidom-text"   # "minidom-text" or "mbpf"
+  allow_minidom_text: true
+  default_compression: "gzip"           # "gzip", "brotli", or "none"
+
+images:
+  default_format: "jpeg"    # "jpeg", "png", "gif"
+  default_quality: "medium" # "high", "medium", "low"
+  max_width: 800
+  max_height: 1200

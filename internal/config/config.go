@@ -4,91 +4,195 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config holds all server configuration.
 type Config struct {
-	Server   ServerConfig
-	Auth     AuthConfig
-	Browser  BrowserConfig
-	Session  SessionConfig
-	Encoding EncodingConfig
-	Images   ImageConfig
+	Server   ServerConfig   `yaml:"server"`
+	Auth     AuthConfig     `yaml:"auth"`
+	Browser  BrowserConfig  `yaml:"browser"`
+	Session  SessionConfig  `yaml:"session"`
+	Encoding EncodingConfig `yaml:"encoding"`
+	Images   ImageConfig    `yaml:"images"`
 }
 
 type ServerConfig struct {
-	ListenAddr   string
-	HTTPSEnabled bool
-	CertFile     string
-	KeyFile      string
+	ListenAddr   string `yaml:"listen"`
+	HTTPSEnabled bool   `yaml:"https_enabled"`
+	CertFile     string `yaml:"cert_file"`
+	KeyFile      string `yaml:"key_file"`
 }
 
 type AuthConfig struct {
-	Enabled    bool
-	StaticToken string // single static API token for Phase 1
+	Enabled     bool   `yaml:"enabled"`
+	StaticToken string `yaml:"static_token"`
 }
 
 type BrowserConfig struct {
-	Engine        string // "chromium"
-	ChromiumPath  string // empty = auto-detect
-	WorkerPoolMin int
-	WorkerPoolMax int
-	Headless      bool
+	Engine        string `yaml:"engine"`
+	ChromiumPath  string `yaml:"chromium_path"`
+	WorkerPoolMin int    `yaml:"worker_pool_min"`
+	WorkerPoolMax int    `yaml:"worker_pool_max"`
+	Headless      bool   `yaml:"headless"`
 }
 
 type SessionConfig struct {
-	IdleTimeout time.Duration
-	MaxTabs     int
+	IdleTimeout time.Duration `yaml:"-"` // parsed from IdleTimeoutStr
+	IdleTimeoutStr string     `yaml:"idle_timeout"`
+	MaxTabs     int           `yaml:"max_tabs"`
 }
 
 type EncodingConfig struct {
-	DefaultPageFormat   string // "minidom-text" or "mbpf"
-	AllowMinidomText    bool
-	DefaultCompression  string // "none", "gzip", "brotli"
+	DefaultPageFormat  string `yaml:"default_page_format"`
+	AllowMinidomText   bool   `yaml:"allow_minidom_text"`
+	DefaultCompression string `yaml:"default_compression"`
 }
 
 type ImageConfig struct {
-	DefaultFormat  string // "jpeg", "webp", "png", "gif"
-	DefaultQuality string // "high", "medium", "low"
-	MaxWidth       int
-	MaxHeight      int
+	DefaultFormat  string `yaml:"default_format"`
+	DefaultQuality string `yaml:"default_quality"`
+	MaxWidth       int    `yaml:"max_width"`
+	MaxHeight      int    `yaml:"max_height"`
 }
 
-// Load reads configuration from environment variables with sensible defaults.
+// Load reads config from a YAML file (if present), then overlays env-var overrides.
+// The YAML file path defaults to "config.yaml" and can be changed via CONFIG_FILE.
 func Load() *Config {
+	cfg := defaults()
+
+	// Try loading from YAML file.
+	cfgFile := env("CONFIG_FILE", "config.yaml")
+	if data, err := os.ReadFile(cfgFile); err == nil {
+		// Ignore parse errors — just fall through to defaults + env vars.
+		_ = yaml.Unmarshal(data, cfg)
+		// Parse string duration from YAML.
+		if cfg.Session.IdleTimeoutStr != "" {
+			if d, err := time.ParseDuration(cfg.Session.IdleTimeoutStr); err == nil {
+				cfg.Session.IdleTimeout = d
+			}
+		}
+	}
+
+	// Env-var overrides (always take precedence over file).
+	applyEnvOverrides(cfg)
+	return cfg
+}
+
+func defaults() *Config {
 	return &Config{
 		Server: ServerConfig{
-			ListenAddr:   env("LISTEN", ":8080"),
-			HTTPSEnabled: envBool("HTTPS_ENABLED", false),
-			CertFile:     env("TLS_CERT", ""),
-			KeyFile:      env("TLS_KEY", ""),
+			ListenAddr:   ":8080",
+			HTTPSEnabled: false,
 		},
 		Auth: AuthConfig{
-			Enabled:     envBool("AUTH_ENABLED", false),
-			StaticToken: env("AUTH_TOKEN", ""),
+			Enabled: false,
 		},
 		Browser: BrowserConfig{
-			Engine:        env("BROWSER_ENGINE", "chromium"),
-			ChromiumPath:  env("CHROMIUM_PATH", ""),
-			WorkerPoolMin: envInt("WORKER_POOL_MIN", 1),
-			WorkerPoolMax: envInt("WORKER_POOL_MAX", 4),
-			Headless:      envBool("BROWSER_HEADLESS", true),
+			Engine:        "chromium",
+			WorkerPoolMin: 1,
+			WorkerPoolMax: 4,
+			Headless:      true,
 		},
 		Session: SessionConfig{
-			IdleTimeout: envDuration("IDLE_TIMEOUT", 10*time.Minute),
-			MaxTabs:     envInt("MAX_TABS", 10),
+			IdleTimeout: 10 * time.Minute,
+			MaxTabs:     10,
 		},
 		Encoding: EncodingConfig{
-			DefaultPageFormat:  env("DEFAULT_PAGE_FORMAT", "minidom-text"),
-			AllowMinidomText:   envBool("ALLOW_MINIDOM_TEXT", true),
-			DefaultCompression: env("DEFAULT_COMPRESSION", "gzip"),
+			DefaultPageFormat:  "minidom-text",
+			AllowMinidomText:   true,
+			DefaultCompression: "gzip",
 		},
 		Images: ImageConfig{
-			DefaultFormat:  env("IMAGE_FORMAT", "jpeg"),
-			DefaultQuality: env("IMAGE_QUALITY", "medium"),
-			MaxWidth:       envInt("IMAGE_MAX_WIDTH", 800),
-			MaxHeight:      envInt("IMAGE_MAX_HEIGHT", 1200),
+			DefaultFormat:  "jpeg",
+			DefaultQuality: "medium",
+			MaxWidth:       800,
+			MaxHeight:      1200,
 		},
+	}
+}
+
+func applyEnvOverrides(cfg *Config) {
+	if v := os.Getenv("LISTEN"); v != "" {
+		cfg.Server.ListenAddr = v
+	}
+	if v := os.Getenv("HTTPS_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Server.HTTPSEnabled = b
+		}
+	}
+	if v := os.Getenv("TLS_CERT"); v != "" {
+		cfg.Server.CertFile = v
+	}
+	if v := os.Getenv("TLS_KEY"); v != "" {
+		cfg.Server.KeyFile = v
+	}
+	if v := os.Getenv("AUTH_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Auth.Enabled = b
+		}
+	}
+	if v := os.Getenv("AUTH_TOKEN"); v != "" {
+		cfg.Auth.StaticToken = v
+	}
+	if v := os.Getenv("BROWSER_ENGINE"); v != "" {
+		cfg.Browser.Engine = v
+	}
+	if v := os.Getenv("CHROMIUM_PATH"); v != "" {
+		cfg.Browser.ChromiumPath = v
+	}
+	if v := os.Getenv("WORKER_POOL_MIN"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Browser.WorkerPoolMin = n
+		}
+	}
+	if v := os.Getenv("WORKER_POOL_MAX"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Browser.WorkerPoolMax = n
+		}
+	}
+	if v := os.Getenv("BROWSER_HEADLESS"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Browser.Headless = b
+		}
+	}
+	if v := os.Getenv("IDLE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Session.IdleTimeout = d
+		}
+	}
+	if v := os.Getenv("MAX_TABS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Session.MaxTabs = n
+		}
+	}
+	if v := os.Getenv("DEFAULT_PAGE_FORMAT"); v != "" {
+		cfg.Encoding.DefaultPageFormat = v
+	}
+	if v := os.Getenv("ALLOW_MINIDOM_TEXT"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Encoding.AllowMinidomText = b
+		}
+	}
+	if v := os.Getenv("DEFAULT_COMPRESSION"); v != "" {
+		cfg.Encoding.DefaultCompression = v
+	}
+	if v := os.Getenv("IMAGE_FORMAT"); v != "" {
+		cfg.Images.DefaultFormat = v
+	}
+	if v := os.Getenv("IMAGE_QUALITY"); v != "" {
+		cfg.Images.DefaultQuality = v
+	}
+	if v := os.Getenv("IMAGE_MAX_WIDTH"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Images.MaxWidth = n
+		}
+	}
+	if v := os.Getenv("IMAGE_MAX_HEIGHT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Images.MaxHeight = n
+		}
 	}
 }
 
@@ -97,40 +201,4 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func envBool(key string, fallback bool) bool {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
-	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		return fallback
-	}
-	return b
-}
-
-func envInt(key string, fallback int) int {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(v)
-	if err != nil {
-		return fallback
-	}
-	return n
-}
-
-func envDuration(key string, fallback time.Duration) time.Duration {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil {
-		return fallback
-	}
-	return d
 }
