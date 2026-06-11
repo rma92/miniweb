@@ -22,6 +22,12 @@ func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, 
 	r.Use(middleware.RealIP)
 	r.Use(metrics.Middleware)
 
+	// Per-IP rate limiting (applies to API routes only).
+	if cfg.Server.RateLimitPerSec > 0 {
+		rl := NewRateLimiter(cfg.Server.RateLimitPerSec, cfg.Server.RateLimitBurst)
+		r.Use(RateLimitMiddleware(rl))
+	}
+
 	// Prometheus metrics endpoint (unauthenticated by design — same as most infra).
 	r.Handle("/metrics", metrics.Handler())
 

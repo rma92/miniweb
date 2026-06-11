@@ -6,6 +6,8 @@ server:
   https_enabled: false
   # cert_file: "/etc/mininext/tls.crt"
   # key_file:  "/etc/mininext/tls.key"
+  # rate_limit_per_sec: 10   # max API requests/sec per IP (0 = disabled)
+  # rate_limit_burst: 30     # short burst capacity per IP
 
 auth:
   enabled: false
@@ -14,8 +16,8 @@ auth:
 browser:
   engine: "chromium"
   # chromium_path: "/usr/bin/chromium"
-  worker_pool_min: 1
-  worker_pool_max: 4
+  worker_pool_min: 1    # number of Chromium processes to start (each handles N sessions)
+  worker_pool_max: 1    # set > 1 to start that many processes; sessions are load-balanced
   headless: true
 
 session:

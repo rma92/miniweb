@@ -13,6 +13,7 @@ import (
 	"github.com/user/miniweb/internal/api"
 	"github.com/user/miniweb/internal/archive"
 	"github.com/user/miniweb/internal/auth"
+	"github.com/user/miniweb/internal/browser"
 	cdpworker "github.com/user/miniweb/internal/browser/chromedp"
 	"github.com/user/miniweb/internal/config"
 	"github.com/user/miniweb/internal/session"
@@ -28,12 +29,28 @@ func env(key, fallback string) string {
 func main() {
 	cfg := config.Load()
 
-	// Browser worker.
-	worker, err := cdpworker.NewWorkerWithConfig(cfg.Browser.ChromiumPath, cfg.Browser.Headless, cfg)
-	if err != nil {
-		log.Fatalf("create browser worker: %v", err)
+	// Browser worker pool: spawn cfg.Browser.WorkerPoolMin workers, up to WorkerPoolMax.
+	poolSize := cfg.Browser.WorkerPoolMin
+	if poolSize < 1 {
+		poolSize = 1
 	}
-	defer worker.Close()
+	if cfg.Browser.WorkerPoolMax > poolSize {
+		poolSize = cfg.Browser.WorkerPoolMax
+	}
+	poolWorkers := make([]browser.PoolWorker, 0, poolSize)
+	for i := 0; i < poolSize; i++ {
+		w, err := cdpworker.NewWorkerWithConfig(cfg.Browser.ChromiumPath, cfg.Browser.Headless, cfg)
+		if err != nil {
+			log.Fatalf("create browser worker %d: %v", i, err)
+		}
+		poolWorkers = append(poolWorkers, w)
+	}
+	workerPool, err := browser.NewPool(poolWorkers)
+	if err != nil {
+		log.Fatalf("create worker pool: %v", err)
+	}
+	defer workerPool.Close()
+	log.Printf("browser worker pool: %d worker(s)", poolSize)
 
 	// Auth token store.
 	tokenStore := auth.NewInMemoryStore()
@@ -70,16 +87,21 @@ func main() {
 	// Session manager with background expiry.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mgr := session.NewManager(ctx, worker, cfg)
+	mgr := session.NewManager(ctx, workerPool, cfg)
 
-	// Start filter list refresh loop (runs after ctx is available).
+	// Start filter list refresh loop for all workers in the pool.
 	if cfg.AdBlock.Enabled && len(cfg.AdBlock.FilterListURLs) > 0 {
-		if m := worker.AdMatcher(); m != nil {
-			adblock.StartRefreshLoop(ctx, adblock.FilterListConfig{
-				URLs:         cfg.AdBlock.FilterListURLs,
-				RefreshHours: cfg.AdBlock.FilterListRefreshH,
-				CacheDir:     cfg.AdBlock.FilterListCacheDir,
-			}, m)
+		for _, pw := range poolWorkers {
+			if w, ok := pw.(*cdpworker.Worker); ok {
+				if m := w.AdMatcher(); m != nil {
+					adblock.StartRefreshLoop(ctx, adblock.FilterListConfig{
+						URLs:         cfg.AdBlock.FilterListURLs,
+						RefreshHours: cfg.AdBlock.FilterListRefreshH,
+						CacheDir:     cfg.AdBlock.FilterListCacheDir,
+					}, m)
+					break // all workers share domain list from config; one refresh loop is enough
+				}
+			}
 		}
 	}
 

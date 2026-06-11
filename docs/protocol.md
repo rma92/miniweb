@@ -1,8 +1,8 @@
 # MiniNext Protocol Reference
 
-MiniNext exposes a REST API over HTTP(S). All request and response bodies are JSON unless noted.
-Authentication is optional (controlled by `AUTH_ENABLED` env var). When enabled, include
-`Authorization: Bearer <token>` on every request.
+MiniNext exposes a REST API over HTTP(S). All request and response bodies are JSON
+unless noted. Authentication is optional (`auth.enabled` in config or `AUTH_ENABLED`
+env var). When enabled, include `Authorization: Bearer <token>` on every request.
 
 ---
 
@@ -13,17 +13,27 @@ Authentication is optional (controlled by `AUTH_ENABLED` env var). When enabled,
 ```
 POST /api/v1/sessions
 Content-Type: application/json
+```
 
+Request body:
+```json
 {
   "device_profile": "phone-modern",
   "capabilities": {
     "page_formats": ["minidom-text", "mbpf"],
-    "compression": ["gzip", "brotli"],
+    "compression": ["gzip", "brotli", "zstd"],
     "image_formats": ["jpeg", "webp", "png", "gif"],
-    "rendering_profiles": ["box", "flow"]
+    "rendering_profiles": ["box", "flow"],
+    "adblock": true
   }
 }
 ```
+
+`device_profile` options: `phone-small`, `phone-modern`, `tablet`, `desktop-small`,
+`desktop-large`, `custom`. Defaults to `phone-modern`.
+
+`capabilities.adblock` (optional, `*bool`): `true` enables ad blocking for this
+session if the server has ad blocking configured. `null`/omitted = use server default.
 
 Response `200`:
 ```json
@@ -52,92 +62,151 @@ Response `204 No Content`.
 ```
 POST /api/v1/sessions/{session_id}/sleep
 ```
-Response `200`: `{"status":"sleeping"}`
+Frees browser memory while keeping session metadata. Tabs are restored on resume.
+Response `200 {"status": "sleeping"}`.
 
 ### Resume Session
 
 ```
 POST /api/v1/sessions/{session_id}/resume
 ```
-Response `200`: `{"status":"active"}`
+Restores a sleeping session and navigates all tabs to their saved URLs.
+Response `200 {"status": "active"}`.
+
+### Toggle Ad Blocking
+
+```
+POST /api/v1/sessions/{session_id}/adblock
+Content-Type: application/json
+{"enabled": true}
+```
+
+Enables or disables ad blocking for the session immediately (no restart needed).
+Response `200 {"adblock_enabled": true}`.
 
 ---
 
 ## Tabs
 
-### Create Tab
+### Open Tab
 
 ```
 POST /api/v1/sessions/{session_id}/tabs
 Content-Type: application/json
-
-{ "url": "https://example.com" }
+{"url": "https://example.com"}
 ```
 
-Response `200`: `{"tab_id":"tab_..."}`
+Response `200 {"tab_id": "tab_..."}`.
+
+### Close Tab
+
+```
+DELETE /api/v1/sessions/{session_id}/tabs/{tab_id}
+```
+Response `204 No Content`.
 
 ### Navigate
 
 ```
 POST /api/v1/sessions/{session_id}/tabs/{tab_id}/navigate
 Content-Type: application/json
-
-{ "url": "https://example.com/page" }
+{"url": "https://example.com"}
 ```
 
-Response `200`: `{"status":"ok"}`
+Response `200 {"status": "ok"}`.
+
+Error responses:
+- `504` on navigation timeout
+- `502` on DNS/connection failure (body includes `"code"` field: `dns_failure`,
+  `connection_refused`, `connection_timeout`, `tls_error`, `offline`, etc.)
 
 ---
 
-## Snapshot
+## Snapshots
 
-Retrieves the current rendered page for a tab.
+### Get Snapshot
 
 ```
 GET /api/v1/sessions/{session_id}/tabs/{tab_id}/snapshot
-Accept: application/minidom+json        (or application/x-mbpf)
-Accept-Encoding: gzip, br
 ```
 
-Query params (debug overrides):
-- `format=minidom-text` or `format=mbpf`
+Query parameters:
+- `rendering` — `box` (default, full layout) or `flow` (linearised reading order)
+- `format` — `minidom-text` or `mbpf` (overrides Accept header)
+- `since` — snapshot ID of the client's current snapshot; server returns a delta if
+  only a small fraction of nodes changed (see Delta Snapshots below)
 
-Response `200`:
-- Content-Type: `application/minidom+json` or `application/x-mbpf`
-- Content-Encoding: `gzip` or `br` if negotiated
-- Header `X-Snapshot-Id`: snapshot sequence number
-- Body: MiniDOM Text JSON or MBPF binary (see format specs below)
+Request headers:
+- `Accept: application/x-mbpf` → binary MBPF format
+- `Accept: application/minidom+json` → JSON format (default)
+- `Accept-Encoding: zstd, br, gzip` → server selects best supported encoding
+
+Response headers:
+- `Content-Type: application/x-mbpf` or `application/minidom+json`
+- `Content-Encoding: zstd` / `br` / `gzip` (when compressed)
+- `X-Snapshot-Id: <int>` — monotonically increasing snapshot counter for this tab
+
+#### Delta Snapshots
+
+When `?since=<snapshot_id>` is provided and the server's cached base snapshot
+matches, the server computes a node-level diff. If fewer than 60% of nodes
+changed, it returns a compact delta instead of the full snapshot:
+
+```
+Content-Type: application/minidom-delta+json
+```
+
+Delta body:
+```json
+{
+  "base_snapshot_id": 5,
+  "snapshot_id": 6,
+  "url": "...",
+  "title": "...",
+  "favicon_url": "...",
+  "instructions": [
+    {"op": 1, "stable_id": "a1b2c3d4", "node": { ... }},
+    {"op": 2, "stable_id": "e5f6a7b8"},
+    {"op": 3, "stable_id": "c9d0e1f2", "node": { ... }}
+  ]
+}
+```
+
+Operations: `1` = add node, `2` = remove node (by stable_id), `3` = update node.
 
 ---
 
-## Interact
+## Interaction
 
-Dispatches a user interaction and returns an updated snapshot.
+### Interact
 
 ```
 POST /api/v1/sessions/{session_id}/tabs/{tab_id}/interact
 Content-Type: application/json
+```
 
+Request body:
+```json
 {
-  "snapshot_id": 42,
+  "snapshot_id": 5,
+  "rendering_profile": "box",
   "event": {
     "type": "click",
-    "element_id": 12345
+    "element_id": 42
   }
 }
 ```
 
-Event types: `click`, `tap`, `input`, `change`, `submit`
+Event types: `click`, `tap`, `input` (with `value`), `change` (with `value`),
+`submit`, `scroll` (with `scroll_x`, `scroll_y`).
 
-For `input`/`change` events include `"value": "text"`.
-
-Response `200`:
+Response `200` — includes the post-interaction snapshot:
 ```json
 {
   "ok": true,
-  "snapshot_id": 43,
-  "url": "https://example.com/result",
-  "title": "Result page",
+  "snapshot_id": 6,
+  "url": "https://example.com/next",
+  "title": "Next Page",
   "snapshot": { ... }
 }
 ```
@@ -146,135 +215,239 @@ Response `200`:
 
 ## Resources
 
-Fetches and recompresses an image resource referenced in a snapshot.
+### Get Resource (Image)
 
 ```
 GET /api/v1/sessions/{session_id}/tabs/{tab_id}/resources/{resource_id}
 ```
 
-Response `200` with `Content-Type: image/jpeg` (or png/gif/webp).
-Response is cached for subsequent requests within the session.
+Returns the recompressed image for a resource referenced by an IMAGE node's
+`resource_id` field. Responses include `ETag` and `Cache-Control: public, max-age=3600`.
+Supports `If-None-Match` for 304 responses.
 
 ---
 
-## MiniDOM Text Format
+## Archives (Offline Reading)
 
-MiniDOM Text is a JSON object:
+Archives are enabled by setting `archive.enabled: true` in the config.
+Archived pages are stored as compressed MBPF (brotli) with images inlined.
+
+### Save Archive
+
+```
+POST /api/v1/sessions/{session_id}/tabs/{tab_id}/archive
+```
+
+Captures the current tab in flow mode with inline images and stores it for
+offline reading. The oldest archive is auto-deleted when `max_per_user` is exceeded.
+
+Response `200`:
+```json
+{
+  "archive_id": "abc123...",
+  "url": "https://example.com",
+  "title": "Example Domain",
+  "size": 12345
+}
+```
+
+### List Archives
+
+```
+GET /api/v1/archives
+```
+
+Returns all archives for the authenticated user, newest first.
+
+Response `200` — array of:
+```json
+[
+  {
+    "id": "abc123...",
+    "url": "https://example.com",
+    "title": "Example Domain",
+    "favicon_url": "...",
+    "size": 12345,
+    "created_at": "2026-06-11T12:34:56Z"
+  }
+]
+```
+
+### Get Archive
+
+```
+GET /api/v1/archives/{archive_id}
+```
+
+Returns the archived snapshot. Accepts the same `Accept` header as the snapshot
+endpoint. Supports `ETag` / `If-None-Match` caching.
+
+### Delete Archive
+
+```
+DELETE /api/v1/archives/{archive_id}
+```
+
+Response `204 No Content`.
+
+---
+
+## Metrics
+
+```
+GET /metrics
+```
+
+Prometheus-format metrics. No authentication required.
+
+Key metrics:
+- `mininext_http_requests_total{method, path, status}`
+- `mininext_http_request_duration_seconds{method, path}`
+- `mininext_snapshot_bytes{format, rendering}`
+- `mininext_snapshot_compressed_bytes{format, compression}`
+- `mininext_active_sessions`
+- `mininext_adblock_requests_blocked_total`
+- `mininext_full_snapshots_sent_total`
+- `mininext_delta_snapshots_sent_total`
+
+---
+
+## Admin API
+
+Requires `Authorization: Bearer <admin_token>` (set via `archive.admin_token` in
+config or `ADMIN_TOKEN` env var). Returns 403 if admin token is not configured.
+
+### List All Sessions
+
+```
+GET /admin/sessions
+```
+
+Returns all active sessions across all users with tab URLs and state.
+
+### Force Delete Session
+
+```
+DELETE /admin/sessions/{session_id}
+```
+
+Force-kills a session regardless of ownership. Response `204 No Content`.
+
+### Config View
+
+```
+GET /admin/config
+```
+
+Returns the running configuration with sensitive fields (`auth.static_token`,
+`archive.admin_token`) redacted as `[redacted]`.
+
+### Server Status
+
+```
+GET /admin/status
+```
+
+Response `200`:
+```json
+{
+  "uptime_seconds": 3600.5,
+  "sessions": 3,
+  "goroutines": 42,
+  "heap_mb": 128.5
+}
+```
+
+---
+
+## MiniDOM Text Format (JSON)
+
+Content-Type: `application/minidom+json`
 
 ```json
 {
   "format": "minidom-text",
   "version": 1,
-  "snapshot_id": 42,
-  "url": "https://example.com/",
+  "snapshot_id": 5,
+  "url": "https://example.com",
   "title": "Example Domain",
-  "nodes": [
-    {
-      "id": 1,
-      "type": "DOCUMENT",
-      "parent_id": 0,
-      "children": [2],
-      "text": "",
-      "layout": {"x": 0, "y": 0, "w": 390, "h": 844},
-      "style": {"color": "rgb(0,0,0)", "font_size": "16px", "display": "block"}
-    },
-    {
-      "id": 2,
-      "type": "HEADING",
-      "parent_id": 1,
-      "text": "Example Domain",
-      "layout": {"x": 10, "y": 20, "w": 370, "h": 32}
-    },
-    {
-      "id": 3,
-      "type": "LINK",
-      "parent_id": 1,
-      "text": "More information",
-      "interaction": {
-        "element_id": 1,
-        "kind": "link",
-        "enabled": true,
-        "href": "https://www.iana.org/domains/example",
-        "action_hint": "click"
-      }
-    }
-  ],
-  "resources": []
+  "favicon_url": "https://example.com/favicon.ico",
+  "nodes": [ ... ],
+  "resources": [ ... ]
 }
 ```
 
-### Node Types
-
-`DOCUMENT`, `SECTION`, `BLOCK`, `INLINE`, `TEXT`, `LINK`, `IMAGE`, `BUTTON`, `INPUT`,
-`TEXTAREA`, `SELECT`, `OPTION`, `FORM`, `TABLE`, `TABLE_ROW`, `TABLE_CELL`, `LIST`,
-`LIST_ITEM`, `HEADING`, `CANVAS_FALLBACK`, `UNKNOWN`
-
-### Interaction Object
-
+Each node:
 ```json
 {
-  "element_id": 12345,
-  "kind": "link|button|input|textarea|select|form|custom",
-  "enabled": true,
-  "readonly": false,
-  "value": "current value",
-  "placeholder": "hint text",
-  "href": "https://... (links only)",
-  "form_id": 0,
-  "action_hint": "click|submit|type|change",
-  "input_type": "text|password|email|...",
-  "name": "field name"
+  "id": 1,
+  "stable_id": "a1b2c3d4",
+  "type": "HEADING",
+  "parent_id": 0,
+  "children": [2, 3],
+  "text": "Example Domain",
+  "layout": {"x": 8, "y": 100, "w": 374, "h": 38},
+  "style": {"font_size": "24px", "font_weight": "700"},
+  "interaction": {
+    "element_id": 1, "kind": "link", "enabled": true,
+    "href": "https://iana.org/", "action_hint": "click"
+  },
+  "resource_id": "res_..."
 }
 ```
+
+Node types: `DOCUMENT`, `SECTION`, `BLOCK`, `INLINE`, `TEXT`, `LINK`, `IMAGE`,
+`BUTTON`, `INPUT`, `TEXTAREA`, `SELECT`, `OPTION`, `FORM`, `TABLE`, `TABLE_ROW`,
+`TABLE_CELL`, `LIST`, `LIST_ITEM`, `HEADING`, `CANVAS_FALLBACK`, `UNKNOWN`.
+
+Each resource:
+```json
+{
+  "resource_id": "res_...",
+  "url": "https://example.com/img.jpg",
+  "mime_type": "image/jpeg",
+  "width": 640,
+  "height": 480,
+  "inline_data": "<base64>"
+}
+```
+
+`inline_data` is present for archived snapshots; otherwise the client fetches via
+the resource endpoint.
 
 ---
 
 ## MBPF Binary Format
 
+Content-Type: `application/x-mbpf`
+
 See `docs/mbpf-spec.md` for the full binary format specification.
 
-Container layout:
-```
-magic:          4 bytes  "MBPF"
-version:        varint   (currently 1)
-flags:          varint
-page_id:        varint
-snapshot_id:    varint
-profile_id:     varint
-section_count:  varint
-sections:       repeated { type_id: varint, byte_length: varint, data: bytes }
-```
+Sections present in a full snapshot:
+| ID | Name              | Contents                                     |
+|----|-------------------|----------------------------------------------|
+|  1 | STRING_TABLE      | Length-prefixed UTF-8 strings                |
+|  2 | PAGE_META         | URL, title, favicon_url (string table refs)  |
+|  4 | NODE_TREE         | Node records with stable_id, type, flags     |
+|  5 | LAYOUT_TABLE      | Fixed-point (×10) coordinates                |
+|  6 | INTERACTION       | ElementID, kind, href, value, etc.           |
+|  7 | RESOURCE_TABLE    | ResourceRef entries with optional InlineData |
+| 11 | DELTA_INSTRUCTIONS| (reserved for future binary delta encoding) |
 
-Sections present in Phase 1: STRING_TABLE(1), NODE_TREE(4), LAYOUT_TABLE(5),
-INTERACTION_TABLE(6), RESOURCE_TABLE(7).
-
-All integers use unsigned LEB-128 (identical to protobuf varint without zigzag encoding).
+Node record fields (in order):
+`id`, `type_id`, `flags`, `parent_id`, `text_idx`, `stable_id_idx`,
+then conditionally: `layout_idx` (if flags&1), `resource_id_idx` (if flags&4),
+`interaction_idx` (if flags&2).
 
 ---
 
 ## Device Profiles
 
-| Name | Width | Height | Mobile |
-|------|-------|--------|--------|
-| phone-small | 360 | 640 | yes |
-| phone-modern | 390 | 844 | yes |
-| tablet | 768 | 1024 | no |
-| desktop-small | 1280 | 800 | no |
-| desktop-large | 1920 | 1080 | no |
-
----
-
-## Error Responses
-
-All errors return JSON:
-```json
-{ "error": "description of the problem" }
-```
-
-HTTP status codes:
-- `400` — bad request (missing/invalid parameters)
-- `401` — authentication required or invalid token
-- `403` — session belongs to a different user
-- `404` — session or tab not found (or expired)
-- `502` — remote browser error (navigation failure, etc.)
-- `500` — internal server error
+| Name           | Width | Height | Scale | Touch | UA                    |
+|----------------|-------|--------|-------|-------|-----------------------|
+| phone-small    | 360   | 640    | 2×    | yes   | Android Chrome        |
+| phone-modern   | 390   | 844    | 3×    | yes   | iPhone Safari         |
+| tablet         | 768   | 1024   | 2×    | yes   | iPad Safari           |
+| desktop-small  | 1280  | 800    | 1×    | no    | Desktop Chrome        |
+| desktop-large  | 1920  | 1080   | 1×    | no    | Desktop Chrome        |
+| custom         | 1280  | 800    | 1×    | no    | Desktop Chrome        |

@@ -36,10 +36,12 @@ type AdBlockConfig struct {
 }
 
 type ServerConfig struct {
-	ListenAddr   string `yaml:"listen"`
-	HTTPSEnabled bool   `yaml:"https_enabled"`
-	CertFile     string `yaml:"cert_file"`
-	KeyFile      string `yaml:"key_file"`
+	ListenAddr        string  `yaml:"listen"`
+	HTTPSEnabled      bool    `yaml:"https_enabled"`
+	CertFile          string  `yaml:"cert_file"`
+	KeyFile           string  `yaml:"key_file"`
+	RateLimitPerSec   float64 `yaml:"rate_limit_per_sec"`   // 0 = disabled
+	RateLimitBurst    float64 `yaml:"rate_limit_burst"`
 }
 
 type AuthConfig struct {
@@ -100,8 +102,10 @@ func Load() *Config {
 func defaults() *Config {
 	return &Config{
 		Server: ServerConfig{
-			ListenAddr:   ":8080",
-			HTTPSEnabled: false,
+			ListenAddr:      ":8080",
+			HTTPSEnabled:    false,
+			RateLimitPerSec: 0, // disabled by default
+			RateLimitBurst:  30,
 		},
 		Auth: AuthConfig{
 			Enabled: false,
