@@ -451,3 +451,93 @@ then conditionally: `layout_idx` (if flags&1), `resource_id_idx` (if flags&4),
 | desktop-small  | 1280  | 800    | 1×    | no    | Desktop Chrome        |
 | desktop-large  | 1920  | 1080   | 1×    | no    | Desktop Chrome        |
 | custom         | 1280  | 800    | 1×    | no    | Desktop Chrome        |
+
+---
+
+## Persistence Across Restarts
+
+MiniNext supports two independent persistence mechanisms.
+
+### Session and Tab Persistence
+
+Set `session.persistence_db` in `config.yaml` (or `SESSION_PERSISTENCE_DB` env var) to a
+bbolt file path (e.g. `sessions.db`). When enabled:
+
+- Every `CreateSession`, `OpenTab`, `Navigate`, `CloseTab`, and `DeleteSession` call
+  atomically updates the database.
+- On startup, MiniNext reads all records and re-creates sessions in the browser worker,
+  navigating each tab to its last known URL.
+- Clients can reconnect using their saved `session_id` and `tab_id` values without
+  re-authenticating or re-navigating.
+
+If a tab's navigation fails on restore (e.g. network error), the tab is still registered
+and can be navigated manually by the client.
+
+### Cookie and localStorage Persistence
+
+Set `browser.user_data_dir` in `config.yaml` (or `BROWSER_USER_DATA_DIR` env var) to a
+directory path (e.g. `.browser_profile`). Chromium stores cookies, localStorage,
+IndexedDB, and cached credentials in this directory. When the server restarts, the browser
+reuses the same profile, so logins and preferences on visited sites survive restarts.
+
+All browser workers share a single user data directory, making this most suitable for
+single-user deployments. For multi-user deployments, omit this setting to use Chromium's
+default in-memory profile.
+
+---
+
+## Sandbox and Process Isolation
+
+### Chromium's Built-in Sandbox
+
+By default, MiniNext launches Chromium with `--no-sandbox` for compatibility with
+Docker and other unprivileged container environments. On bare-metal Linux hosts with
+user-namespace support, you can disable this to let Chromium run its own highly
+effective process sandbox:
+
+```yaml
+browser:
+  no_sandbox: false
+```
+
+Or set `BROWSER_NO_SANDBOX=false` in the environment.
+
+### OS-Level Sandbox Wrapper
+
+For an additional isolation layer, configure `browser.sandbox_wrapper` with a prefix
+command (firejail, bubblewrap, etc.). MiniNext generates a wrapper script at startup
+and uses it as the Chromium exec path.
+
+**firejail** (simplest):
+```yaml
+browser:
+  sandbox_wrapper: ["firejail", "--"]
+```
+
+**bubblewrap** (more control — adjust paths for your distro):
+```yaml
+browser:
+  sandbox_wrapper:
+    - "bwrap"
+    - "--ro-bind"; - "/usr"; - "/usr"
+    - "--ro-bind"; - "/lib64"; - "/lib64"
+    - "--dev"; - "/dev"
+    - "--proc"; - "/proc"
+    - "--tmpfs"; - "/tmp"
+    - "--unshare-net"
+    - "--"
+```
+
+The wrapper receives all Chromium flags as positional arguments via `"$@"`.
+
+### Extra Chromium Flags
+
+Use `browser.extra_flags` to pass arbitrary Chromium flags for hardening or tuning:
+
+```yaml
+browser:
+  extra_flags:
+    - "--disable-extensions"
+    - "--disable-plugins"
+    - "--js-flags=--max-old-space-size=256"
+```

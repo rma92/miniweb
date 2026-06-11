@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +24,7 @@ type Worker struct {
 	mu          sync.RWMutex
 	sessions    map[browser.SessionHandle]*cdpSession
 	adMatcher   *adblock.Matcher // nil when ad blocking is disabled
+	wrapperPath string           // temp wrapper script path (cleaned up on Close)
 }
 
 type cdpSession struct {
@@ -51,16 +54,60 @@ func NewWorker(chromiumPath string, headless bool) (*Worker, error) {
 
 // NewWorkerWithConfig creates a Worker, optionally enabling ad blocking from cfg.
 func NewWorkerWithConfig(chromiumPath string, headless bool, cfg *config.Config) (*Worker, error) {
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("no-sandbox", true),
+	// Start from defaults but strip the bundled --no-sandbox flag; we manage it ourselves.
+	base := chromedp.DefaultExecAllocatorOptions[:]
+	filtered := make([]chromedp.ExecAllocatorOption, 0, len(base)+8)
+	for _, o := range base {
+		filtered = append(filtered, o)
+	}
+	opts := append(filtered,
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-background-networking", true),
 	)
+
+	noSandbox := true // safe default for Docker/containers
+	if cfg != nil {
+		noSandbox = cfg.Browser.NoSandbox
+	}
+	if noSandbox {
+		opts = append(opts, chromedp.Flag("no-sandbox", true))
+	}
+
 	if !headless {
 		opts = append(opts, chromedp.Flag("headless", false))
 	}
-	if chromiumPath != "" {
+	if cfg != nil && cfg.Browser.UserDataDir != "" {
+		opts = append(opts, chromedp.Flag("user-data-dir", cfg.Browser.UserDataDir))
+	}
+
+	// Apply extra Chromium flags from config.
+	if cfg != nil {
+		for _, flag := range cfg.Browser.ExtraFlags {
+			// Expect flags in "--flag" or "--flag=value" form.
+			flag = strings.TrimPrefix(flag, "--")
+			if eq := strings.IndexByte(flag, '='); eq >= 0 {
+				opts = append(opts, chromedp.Flag(flag[:eq], flag[eq+1:]))
+			} else {
+				opts = append(opts, chromedp.Flag(flag, true))
+			}
+		}
+	}
+
+	// If a sandbox wrapper (firejail, bubblewrap, etc.) is configured, generate a
+	// small shell script that prepends the wrapper command before chromium. chromedp
+	// calls ExecPath as the binary, passing Chrome flags as arguments; the wrapper
+	// script forwards those arguments to the real Chromium binary.
+	var wrapperPath string
+	if cfg != nil && len(cfg.Browser.SandboxWrapper) > 0 {
+		var err error
+		wrapperPath, err = writeSandboxWrapper(cfg.Browser.SandboxWrapper, chromiumPath)
+		if err != nil {
+			return nil, fmt.Errorf("create sandbox wrapper script: %w", err)
+		}
+		opts = append(opts, chromedp.ExecPath(wrapperPath))
+		log.Printf("sandbox wrapper: %s", strings.Join(cfg.Browser.SandboxWrapper, " "))
+	} else if chromiumPath != "" {
 		opts = append(opts, chromedp.ExecPath(chromiumPath))
 	}
 
@@ -70,6 +117,7 @@ func NewWorkerWithConfig(chromiumPath string, headless bool, cfg *config.Config)
 		allocCtx:    allocCtx,
 		allocCancel: allocCancel,
 		sessions:    make(map[browser.SessionHandle]*cdpSession),
+		wrapperPath: wrapperPath,
 	}
 	if cfg != nil && cfg.AdBlock.Enabled {
 		w.adMatcher = adblock.NewMatcher(cfg.AdBlock.ExtraDomains)
@@ -78,9 +126,50 @@ func NewWorkerWithConfig(chromiumPath string, headless bool, cfg *config.Config)
 	return w, nil
 }
 
-// Close shuts down the shared allocator.
+// writeSandboxWrapper generates a small executable shell script that prepends
+// wrapperCmd before the chromium binary and forwards all arguments.
+// The caller is responsible for removing the file when done (via Worker.Close).
+func writeSandboxWrapper(wrapperCmd []string, chromiumPath string) (string, error) {
+	f, err := os.CreateTemp("", "mininext-sandbox-*.sh")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	// Shell-escape each component using single-quote wrapping.
+	escape := func(s string) string {
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+
+	parts := make([]string, 0, len(wrapperCmd)+2)
+	for _, c := range wrapperCmd {
+		parts = append(parts, escape(c))
+	}
+	if chromiumPath != "" {
+		parts = append(parts, escape(chromiumPath))
+	} else {
+		// Fall back to PATH lookup.
+		parts = append(parts, "chromium")
+	}
+
+	script := "#!/bin/sh\nexec " + strings.Join(parts, " ") + ` "$@"` + "\n"
+	if _, err := f.WriteString(script); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := os.Chmod(f.Name(), 0700); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+// Close shuts down the shared allocator and removes any temp wrapper script.
 func (w *Worker) Close() {
 	w.allocCancel()
+	if w.wrapperPath != "" {
+		os.Remove(w.wrapperPath)
+	}
 }
 
 // Healthy performs a lightweight CDP round-trip to verify the Chromium process

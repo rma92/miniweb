@@ -20,9 +20,36 @@ browser:
   worker_pool_max: 1    # set > 1 to start that many processes; sessions are load-balanced
   headless: true
 
+  # no_sandbox: true     # default true (required for Docker / unprivileged containers)
+  #                      # set false on bare metal to enable Chromium's built-in process sandbox
+
+  # sandbox_wrapper:     # optional OS-level sandbox wrapper prepended before the chromium binary
+  #   - "firejail"       # example: firejail (https://firejail.wordpress.com/)
+  #   - "--"
+  # sandbox_wrapper:     # example: bubblewrap (https://github.com/containers/bubblewrap)
+  #   - "bwrap"
+  #   - "--ro-bind"; - "/usr"; - "/usr"
+  #   - "--ro-bind"; - "/lib"; - "/lib"
+  #   - "--dev"; - "/dev"
+  #   - "--proc"; - "/proc"
+  #   - "--tmpfs"; - "/tmp"
+  #   - "--unshare-net"
+  #   - "--"
+
+  # extra_flags:         # additional Chromium CLI flags (--flag or --flag=value form)
+  #   - "--disable-extensions"
+  #   - "--js-flags=--max-old-space-size=256"
+
+  # user_data_dir: ".browser_profile"  # persistent Chromium profile dir (preserves cookies
+  #                                     # and localStorage across server restarts); all workers
+  #                                     # share one profile directory (suitable for single-user)
+
 session:
   idle_timeout: "10m"
   max_tabs: 10
+  # persistence_db: "sessions.db"  # bbolt file to persist open sessions across restarts;
+  #                                 # on startup MiniNext will re-open saved sessions and
+  #                                 # navigate each tab back to its last URL
 
 encoding:
   default_page_format: "minidom-text"   # "minidom-text" or "mbpf"

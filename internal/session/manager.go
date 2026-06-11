@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 	"github.com/user/miniweb/internal/config"
 	"github.com/user/miniweb/internal/metrics"
 	"github.com/user/miniweb/internal/minidom"
+	"github.com/user/miniweb/internal/session/persist"
 )
 
 // Manager owns all active sessions and drives the idle-expiry loop.
@@ -22,6 +24,7 @@ type Manager struct {
 	worker   browser.BrowserWorker
 	cfg      atomic.Pointer[config.Config]
 	snapSeq  atomic.Int64 // global snapshot ID counter
+	store    *persist.Store
 }
 
 // NewManager creates a Manager and starts the background expiry goroutine.
@@ -33,6 +36,95 @@ func NewManager(ctx context.Context, worker browser.BrowserWorker, cfg *config.C
 	m.cfg.Store(cfg)
 	go m.expiryLoop(ctx)
 	return m
+}
+
+// SetPersistStore attaches a persistence store. Must be called before
+// RestoreSessions and before the first session is created.
+func (m *Manager) SetPersistStore(s *persist.Store) {
+	m.store = s
+}
+
+// RestoreSessions re-creates sessions from persisted records on startup.
+// It should be called once after SetPersistStore and before serving requests.
+func (m *Manager) RestoreSessions(records []persist.SessionRecord) {
+	for _, rec := range records {
+		profile, ok := browser.DefaultProfiles[rec.ProfileID]
+		if !ok {
+			profile = browser.DefaultProfiles["phone-modern"]
+		}
+
+		handle, err := m.worker.CreateSession(profile)
+		if err != nil {
+			log.Printf("restore session %s: create browser session: %v", rec.SessionID, err)
+			continue
+		}
+
+		sess := &Session{
+			ID:             rec.SessionID,
+			UserID:         rec.UserID,
+			Handle:         handle,
+			Profile:        profile,
+			State:          StateActive,
+			AdBlockEnabled: rec.AdBlockEnabled,
+			CreatedAt:      rec.CreatedAt,
+			LastActive:     time.Now(),
+			tabs:           make(map[string]*Tab),
+		}
+
+		m.mu.Lock()
+		m.sessions[sess.ID] = sess
+		m.mu.Unlock()
+		metrics.ActiveSessions.Inc()
+
+		restored := 0
+		for _, tr := range rec.Tabs {
+			tabHandle, err := m.worker.OpenTab(handle, tr.CurrentURL)
+			if err != nil {
+				log.Printf("restore tab %s (session %s): %v", tr.TabID, rec.SessionID, err)
+				continue
+			}
+			tab := &Tab{
+				ID:         tr.TabID,
+				SessionID:  sess.ID,
+				Handle:     tabHandle,
+				CurrentURL: tr.CurrentURL,
+			}
+			sess.addTab(tab)
+			restored++
+		}
+		log.Printf("restored session %s (%d/%d tab(s))", rec.SessionID, restored, len(rec.Tabs))
+	}
+}
+
+// persistSession saves the current state of a session to the store (no-op if no store).
+func (m *Manager) persistSession(sess *Session) {
+	if m.store == nil {
+		return
+	}
+	sess.mu.RLock()
+	tabs := make([]persist.TabRecord, 0, len(sess.tabs))
+	for _, t := range sess.tabs {
+		if t.CurrentURL != "" {
+			tabs = append(tabs, persist.TabRecord{
+				TabID:      t.ID,
+				CurrentURL: t.CurrentURL,
+			})
+		}
+	}
+	rec := persist.SessionRecord{
+		SessionID:      sess.ID,
+		UserID:         sess.UserID,
+		ProfileID:      sess.Profile.Name,
+		AdBlockEnabled: sess.AdBlockEnabled,
+		CreatedAt:      sess.CreatedAt,
+		LastActive:     sess.LastActive,
+		Tabs:           tabs,
+	}
+	sess.mu.RUnlock()
+
+	if err := m.store.Save(rec); err != nil {
+		log.Printf("persist session %s: %v", sess.ID, err)
+	}
 }
 
 // UpdateConfig atomically replaces the manager's config (used for SIGHUP reload).
@@ -55,6 +147,7 @@ func (m *Manager) CreateSession(userID string, profile browser.DeviceProfile) (*
 	m.mu.Unlock()
 
 	metrics.ActiveSessions.Inc()
+	m.persistSession(sess)
 	return sess, nil
 }
 
@@ -97,6 +190,7 @@ func (m *Manager) OpenTab(sess *Session, url string) (*Tab, error) {
 	}
 	sess.addTab(tab)
 	sess.touch()
+	m.persistSession(sess)
 	return tab, nil
 }
 
@@ -111,6 +205,7 @@ func (m *Manager) Navigate(sess *Session, tabID, url string) error {
 	}
 	tab.CurrentURL = url
 	sess.touch()
+	m.persistSession(sess)
 	return nil
 }
 
@@ -129,10 +224,14 @@ func (m *Manager) Snapshot(sess *Session, tabID string, opts browser.SnapshotOpt
 	tab.SnapID = int(m.snapSeq.Add(1))
 	snap.SnapshotID = tab.SnapID
 	tab.LastSnap = snap
+	urlChanged := snap.URL != "" && snap.URL != tab.CurrentURL
 	if snap.URL != "" {
 		tab.CurrentURL = snap.URL
 	}
 	sess.touch()
+	if urlChanged {
+		m.persistSession(sess)
+	}
 	return snap, nil
 }
 
@@ -212,6 +311,7 @@ func (m *Manager) CloseTab(sess *Session, tabID string) error {
 	}
 	sess.removeTab(tabID)
 	sess.touch()
+	m.persistSession(sess)
 	return nil
 }
 
@@ -255,6 +355,7 @@ func (m *Manager) SetAdBlock(sess *Session, enabled bool) error {
 	sess.AdBlockEnabled = enabled
 	sess.mu.Unlock()
 	sess.touch()
+	m.persistSession(sess)
 	return nil
 }
 
@@ -272,6 +373,12 @@ func (m *Manager) DeleteSession(id, userID string) error {
 	sess.mu.Lock()
 	sess.State = StateDead
 	sess.mu.Unlock()
+
+	if m.store != nil {
+		if err := m.store.Delete(id); err != nil {
+			log.Printf("persist delete session %s: %v", id, err)
+		}
+	}
 
 	metrics.ActiveSessions.Dec()
 	return m.worker.DestroySession(sess.Handle)

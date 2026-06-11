@@ -20,6 +20,7 @@
   const btnSettings   = document.getElementById('btn-settings');
   const statusBar     = document.getElementById('status-bar');
   const pageContent   = document.getElementById('page-content');
+  const progressBar    = document.getElementById('progress-bar');
   const loadingOverlay = document.getElementById('loading-overlay');
   const tabList       = document.getElementById('tab-list');
   const btnNewTab     = document.getElementById('btn-new-tab');
@@ -40,8 +41,22 @@
     statusBar.className = type || '';
   }
 
+  let _loadingTimer = null;
   function setLoading(on) {
-    loadingOverlay.className = on ? 'visible' : '';
+    if (on) {
+      progressBar.classList.add('loading');
+      // Only show the full overlay for slow loads (>1.5 s).
+      if (!_loadingTimer) {
+        _loadingTimer = setTimeout(() => {
+          loadingOverlay.className = 'visible';
+        }, 1500);
+      }
+    } else {
+      progressBar.classList.remove('loading');
+      clearTimeout(_loadingTimer);
+      _loadingTimer = null;
+      loadingOverlay.className = '';
+    }
   }
 
   function activeTab() {

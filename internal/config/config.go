@@ -50,17 +50,22 @@ type AuthConfig struct {
 }
 
 type BrowserConfig struct {
-	Engine        string `yaml:"engine"`
-	ChromiumPath  string `yaml:"chromium_path"`
-	WorkerPoolMin int    `yaml:"worker_pool_min"`
-	WorkerPoolMax int    `yaml:"worker_pool_max"`
-	Headless      bool   `yaml:"headless"`
+	Engine         string   `yaml:"engine"`
+	ChromiumPath   string   `yaml:"chromium_path"`
+	WorkerPoolMin  int      `yaml:"worker_pool_min"`
+	WorkerPoolMax  int      `yaml:"worker_pool_max"`
+	Headless       bool     `yaml:"headless"`
+	UserDataDir    string   `yaml:"user_data_dir"`    // persistent Chromium profile dir (cookies, localStorage)
+	NoSandbox      bool     `yaml:"no_sandbox"`       // set true inside Docker / unprivileged containers
+	SandboxWrapper []string `yaml:"sandbox_wrapper"`  // prefix command, e.g. ["firejail", "--"] or ["bwrap", ...]
+	ExtraFlags     []string `yaml:"extra_flags"`      // additional Chromium CLI flags
 }
 
 type SessionConfig struct {
-	IdleTimeout time.Duration `yaml:"-"` // parsed from IdleTimeoutStr
-	IdleTimeoutStr string     `yaml:"idle_timeout"`
-	MaxTabs     int           `yaml:"max_tabs"`
+	IdleTimeout    time.Duration `yaml:"-"` // parsed from IdleTimeoutStr
+	IdleTimeoutStr string        `yaml:"idle_timeout"`
+	MaxTabs        int           `yaml:"max_tabs"`
+	PersistenceDB  string        `yaml:"persistence_db"`      // bbolt path; empty = disabled
 }
 
 type EncodingConfig struct {
@@ -115,6 +120,7 @@ func defaults() *Config {
 			WorkerPoolMin: 1,
 			WorkerPoolMax: 4,
 			Headless:      true,
+			NoSandbox:     true, // default true for Docker/container compat; set false on bare metal
 		},
 		Session: SessionConfig{
 			IdleTimeout: 10 * time.Minute,
@@ -194,6 +200,17 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("MAX_TABS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Session.MaxTabs = n
+		}
+	}
+	if v := os.Getenv("SESSION_PERSISTENCE_DB"); v != "" {
+		cfg.Session.PersistenceDB = v
+	}
+	if v := os.Getenv("BROWSER_USER_DATA_DIR"); v != "" {
+		cfg.Browser.UserDataDir = v
+	}
+	if v := os.Getenv("BROWSER_NO_SANDBOX"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Browser.NoSandbox = b
 		}
 	}
 	if v := os.Getenv("DEFAULT_PAGE_FORMAT"); v != "" {

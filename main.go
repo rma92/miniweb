@@ -17,6 +17,7 @@ import (
 	cdpworker "github.com/user/miniweb/internal/browser/chromedp"
 	"github.com/user/miniweb/internal/config"
 	"github.com/user/miniweb/internal/session"
+	"github.com/user/miniweb/internal/session/persist"
 )
 
 func env(key, fallback string) string {
@@ -88,10 +89,34 @@ func main() {
 		log.Printf("archive store opened: %s", cfg.Archive.DBPath)
 	}
 
+	// Session persistence store (optional — only opened if persistence_db is set).
+	var persistStore *persist.Store
+	if cfg.Session.PersistenceDB != "" {
+		var persistErr error
+		persistStore, persistErr = persist.Open(cfg.Session.PersistenceDB)
+		if persistErr != nil {
+			log.Fatalf("open session persistence store: %v", persistErr)
+		}
+		defer persistStore.Close()
+		log.Printf("session persistence enabled: %s", cfg.Session.PersistenceDB)
+	}
+
 	// Session manager with background expiry.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mgr := session.NewManager(ctx, workerPool, cfg)
+
+	// Attach persistence store and restore any sessions from the previous run.
+	if persistStore != nil {
+		mgr.SetPersistStore(persistStore)
+		records, err := persistStore.LoadAll()
+		if err != nil {
+			log.Printf("load persisted sessions: %v", err)
+		} else if len(records) > 0 {
+			log.Printf("restoring %d persisted session(s)...", len(records))
+			mgr.RestoreSessions(records)
+		}
+	}
 
 	// Start worker health monitor (checks every 30s, replaces crashed workers).
 	workerPool.StartHealthMonitor(ctx, 30*time.Second)

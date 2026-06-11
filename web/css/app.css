@@ -120,6 +120,35 @@ body {
 }
 #btn-new-tab:hover { background: #3a3a3a; color: #fff; }
 
+/* ---- Progress bar ---- */
+#progress-bar {
+  height: 3px;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+#progress-bar.loading {
+  background: rgba(0, 153, 255, 0.15);
+}
+
+#progress-bar.loading::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 40%;
+  background: linear-gradient(to right, transparent, #09f, #4cf, #09f, transparent);
+  animation: pg-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes pg-slide {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(350%); }
+}
+
 /* ---- Status bar ---- */
 #status-bar {
   padding: 2px 8px;
