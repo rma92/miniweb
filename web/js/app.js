@@ -292,6 +292,7 @@
     document.getElementById('set-page-format').value = s.pageFormat || 'minidom-text';
     document.getElementById('set-device').value      = s.deviceProfile || 'phone-modern';
     document.getElementById('set-rendering').value   = s.renderingProfile || 'box';
+    document.getElementById('set-adblock').checked   = !!s.adBlockEnabled;
     settingsPanel.classList.remove('hidden');
     settingsStatus.textContent = '';
   }
@@ -305,6 +306,7 @@
     s.pageFormat        = document.getElementById('set-page-format').value;
     s.deviceProfile     = document.getElementById('set-device').value;
     s.renderingProfile  = document.getElementById('set-rendering').value;
+    s.adBlockEnabled    = document.getElementById('set-adblock').checked;
     Settings.save(s);
     settingsStatus.textContent = 'Saved.';
     setTimeout(() => { settingsStatus.textContent = ''; }, 2000);

@@ -16,11 +16,18 @@ import (
 	"github.com/user/miniweb/internal/session"
 )
 
+func env(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func main() {
 	cfg := config.Load()
 
 	// Browser worker.
-	worker, err := cdpworker.NewWorker(cfg.Browser.ChromiumPath, cfg.Browser.Headless)
+	worker, err := cdpworker.NewWorkerWithConfig(cfg.Browser.ChromiumPath, cfg.Browser.Headless, cfg)
 	if err != nil {
 		log.Fatalf("create browser worker: %v", err)
 	}
@@ -32,13 +39,18 @@ func main() {
 		tokenStore.Add(cfg.Auth.StaticToken, "admin")
 		log.Printf("auth enabled; static token loaded")
 	} else if cfg.Auth.Enabled {
-		// Auto-generate a token and print it so the operator knows it.
-		token, err := auth.GenerateToken()
+		// Load from disk or generate a new one (persists across restarts).
+		tokenFile := env("AUTH_TOKEN_FILE", ".mininext_token")
+		token, fresh, err := auth.LoadOrGenerateToken(tokenFile)
 		if err != nil {
-			log.Fatalf("generate auth token: %v", err)
+			log.Fatalf("auth token: %v", err)
 		}
 		tokenStore.Add(token, "admin")
-		log.Printf("auth enabled; generated token: %s", token)
+		if fresh {
+			log.Printf("auth enabled; new token generated and saved to %s: %s", tokenFile, token)
+		} else {
+			log.Printf("auth enabled; token loaded from %s", tokenFile)
+		}
 	}
 
 	// Session manager with background expiry.

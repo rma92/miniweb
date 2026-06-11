@@ -14,6 +14,7 @@ window.Settings = (function() {
     deviceProfile: 'phone-modern',
     pageFormat: 'minidom-text',  // 'minidom-text' or 'mbpf'
     renderingProfile: 'box',     // 'box' (full DOM) or 'flow' (linearized)
+    adBlockEnabled: false,
   };
 
   function get() {

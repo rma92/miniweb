@@ -32,3 +32,9 @@ images:
   default_quality: "medium" # "high", "medium", "low"
   max_width: 800
   max_height: 1200
+
+adblock:
+  enabled: false              # set true to block ads/trackers via CDP Fetch intercept
+  extra_domains: []           # additional domains to block beyond the built-in list
+  # - "ads.example.com"
+  # - "tracking.example.com"

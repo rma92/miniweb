@@ -7,7 +7,9 @@ import (
 	"sync"
 
 	"github.com/chromedp/chromedp"
+	"github.com/user/miniweb/internal/adblock"
 	"github.com/user/miniweb/internal/browser"
+	"github.com/user/miniweb/internal/config"
 	"github.com/user/miniweb/internal/minidom"
 )
 
@@ -17,6 +19,7 @@ type Worker struct {
 	allocCancel context.CancelFunc
 	mu          sync.RWMutex
 	sessions    map[browser.SessionHandle]*cdpSession
+	adMatcher   *adblock.Matcher // nil when ad blocking is disabled
 }
 
 type cdpSession struct {
@@ -39,6 +42,11 @@ type cdpTab struct {
 
 // NewWorker creates a Worker with a shared Chromium allocator process.
 func NewWorker(chromiumPath string, headless bool) (*Worker, error) {
+	return NewWorkerWithConfig(chromiumPath, headless, nil)
+}
+
+// NewWorkerWithConfig creates a Worker, optionally enabling ad blocking from cfg.
+func NewWorkerWithConfig(chromiumPath string, headless bool, cfg *config.Config) (*Worker, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-gpu", true),
@@ -54,11 +62,16 @@ func NewWorker(chromiumPath string, headless bool) (*Worker, error) {
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 
-	return &Worker{
+	w := &Worker{
 		allocCtx:    allocCtx,
 		allocCancel: allocCancel,
 		sessions:    make(map[browser.SessionHandle]*cdpSession),
-	}, nil
+	}
+	if cfg != nil && cfg.AdBlock.Enabled {
+		w.adMatcher = adblock.NewMatcher(cfg.AdBlock.ExtraDomains)
+		log.Printf("ad blocking enabled (%d built-in domains)", len(adblock.BuiltinDomains))
+	}
+	return w, nil
 }
 
 // Close shuts down the shared allocator.
@@ -110,6 +123,13 @@ func (w *Worker) OpenTab(session browser.SessionHandle, url string) (browser.Tab
 	sess.savedURL[tabHandle] = url
 	sess.mu.Unlock()
 
+	// Enable ad blocking on the new tab if configured.
+	if w.adMatcher != nil {
+		if err := enableAdBlocking(tabCtx, w.adMatcher); err != nil {
+			log.Printf("adblock setup for tab %s: %v", tabHandle, err)
+		}
+	}
+
 	if url != "" {
 		if err := chromedp.Run(tabCtx,
 			chromedp.Navigate(url),
@@ -134,7 +154,7 @@ func (w *Worker) Navigate(tab browser.TabHandle, url string) error {
 		chromedp.Navigate(url),
 		chromedp.WaitReady("body", chromedp.ByQuery),
 	); err != nil {
-		return fmt.Errorf("navigate %s: %w", url, err)
+		return wrapNavError(url, err)
 	}
 
 	sess.mu.Lock()

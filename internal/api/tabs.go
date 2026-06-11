@@ -57,7 +57,7 @@ func (h *tabsHandler) navigate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.mgr.Navigate(sess, tabID, body.URL); err != nil {
-		writeError(w, err.Error(), statusForSessionErr(err))
+		writeBrowserError(w, err)
 		return
 	}
 

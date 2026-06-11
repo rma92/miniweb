@@ -32,13 +32,15 @@ window.MiniAPI = (function() {
   }
 
   function createSession(deviceProfile) {
+    const s = Settings.get();
     return request('POST', '/api/v1/sessions', {
       device_profile: deviceProfile || 'phone-modern',
       capabilities: {
         page_formats: ['minidom-text', 'mbpf'],
-        compression: ['gzip', 'brotli'],
+        compression: ['gzip', 'brotli', 'zstd'],
         image_formats: ['jpeg', 'webp', 'png', 'gif'],
         rendering_profiles: ['box', 'flow'],
+        adblock: !!s.adBlockEnabled,
       }
     });
   }

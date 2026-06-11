@@ -16,6 +16,12 @@ type Config struct {
 	Session  SessionConfig  `yaml:"session"`
 	Encoding EncodingConfig `yaml:"encoding"`
 	Images   ImageConfig    `yaml:"images"`
+	AdBlock  AdBlockConfig  `yaml:"adblock"`
+}
+
+type AdBlockConfig struct {
+	Enabled      bool     `yaml:"enabled"`
+	ExtraDomains []string `yaml:"extra_domains"`
 }
 
 type ServerConfig struct {
@@ -110,6 +116,9 @@ func defaults() *Config {
 			MaxWidth:       800,
 			MaxHeight:      1200,
 		},
+		AdBlock: AdBlockConfig{
+			Enabled: false,
+		},
 	}
 }
 
@@ -192,6 +201,11 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("IMAGE_MAX_HEIGHT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Images.MaxHeight = n
+		}
+	}
+	if v := os.Getenv("ADBLOCK_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.AdBlock.Enabled = b
 		}
 	}
 }
