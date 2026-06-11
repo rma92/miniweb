@@ -15,8 +15,9 @@ type interactHandler struct {
 }
 
 type interactRequest struct {
-	SnapshotID int `json:"snapshot_id"`
-	Event      struct {
+	SnapshotID       int    `json:"snapshot_id"`
+	RenderingProfile string `json:"rendering_profile"`
+	Event            struct {
 		Type      string `json:"type"`
 		ElementID int    `json:"element_id"`
 		Value     string `json:"value"`
@@ -55,10 +56,20 @@ func (h *interactHandler) post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Re-snapshot to get the new state and return a new snapshot ID.
-	// Client can then use the returned snapshot directly.
+	// Resolve rendering profile: body > query param > default "box".
+	renderingProfile := req.RenderingProfile
+	if renderingProfile == "" {
+		if q := r.URL.Query().Get("rendering"); q == "flow" || q == "box" {
+			renderingProfile = q
+		}
+	}
+	if renderingProfile != "flow" {
+		renderingProfile = "box"
+	}
+
 	snap, err := h.mgr.Snapshot(sess, tabID, browser.SnapshotOptions{
-		Format: "minidom-text",
+		Format:           "minidom-text",
+		RenderingProfile: renderingProfile,
 	})
 	if err != nil {
 		// Interaction succeeded but snapshot failed; return ok with no new snap.

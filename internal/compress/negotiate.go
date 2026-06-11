@@ -22,8 +22,8 @@ func Negotiate(acceptEncoding string, allowed []string) string {
 		clientAccepts[strings.ToLower(tok)] = true
 	}
 
-	// Prefer algorithms in order: brotli > gzip > none.
-	preference := []string{AlgoBrotli, AlgoGzip, AlgoNone}
+	// Prefer algorithms in order: zstd > brotli > gzip > none.
+	preference := []string{AlgoZstd, AlgoBrotli, AlgoGzip, AlgoNone}
 
 	allowedSet := make(map[string]bool, len(allowed))
 	for _, a := range allowed {
@@ -35,6 +35,10 @@ func Negotiate(acceptEncoding string, allowed []string) string {
 			continue
 		}
 		switch algo {
+		case AlgoZstd:
+			if clientAccepts["zstd"] {
+				return AlgoZstd
+			}
 		case AlgoBrotli:
 			if clientAccepts["br"] {
 				return AlgoBrotli

@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 )
 
 // Algorithm names.
@@ -14,6 +15,7 @@ const (
 	AlgoNone   = "none"
 	AlgoGzip   = "gzip"
 	AlgoBrotli = "brotli"
+	AlgoZstd   = "zstd"
 )
 
 // Compress compresses data using the given algorithm.
@@ -26,6 +28,8 @@ func Compress(algo string, level int, data []byte) ([]byte, error) {
 		return compressGzip(level, data)
 	case AlgoBrotli:
 		return compressBrotli(level, data)
+	case AlgoZstd:
+		return compressZstd(data)
 	default:
 		return nil, fmt.Errorf("unsupported compression algorithm: %s", algo)
 	}
@@ -40,6 +44,8 @@ func Decompress(algo string, data []byte) ([]byte, error) {
 		return decompressGzip(data)
 	case AlgoBrotli:
 		return decompressBrotli(data)
+	case AlgoZstd:
+		return decompressZstd(data)
 	default:
 		return nil, fmt.Errorf("unsupported decompression algorithm: %s", algo)
 	}
@@ -52,6 +58,8 @@ func ContentEncoding(algo string) string {
 		return "gzip"
 	case AlgoBrotli:
 		return "br"
+	case AlgoZstd:
+		return "zstd"
 	default:
 		return ""
 	}
@@ -102,4 +110,21 @@ func compressBrotli(level int, data []byte) ([]byte, error) {
 func decompressBrotli(data []byte) ([]byte, error) {
 	r := brotli.NewReader(bytes.NewReader(data))
 	return io.ReadAll(r)
+}
+
+func compressZstd(data []byte) ([]byte, error) {
+	enc, err := zstd.NewWriter(nil)
+	if err != nil {
+		return nil, err
+	}
+	return enc.EncodeAll(data, nil), nil
+}
+
+func decompressZstd(data []byte) ([]byte, error) {
+	dec, err := zstd.NewReader(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer dec.Close()
+	return dec.DecodeAll(data, nil)
 }

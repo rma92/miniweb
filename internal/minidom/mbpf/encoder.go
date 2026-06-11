@@ -36,6 +36,7 @@ func (e *encoder) encode(snap *minidom.PageSnapshot) ([]byte, error) {
 	// encode nodes.
 	e.internString(snap.URL)
 	e.internString(snap.Title)
+	e.internString(snap.FaviconURL)
 	for i := range snap.Nodes {
 		e.internNodeStrings(&snap.Nodes[i])
 	}
@@ -47,9 +48,10 @@ func (e *encoder) encode(snap *minidom.PageSnapshot) ([]byte, error) {
 
 	// Build sections.
 	stringSection := e.buildStringSection()
+	pageMetaSection := e.buildPageMetaSection(snap)
 	nodeSection, layoutSection, interactionSection, resourceSection := e.buildNodeSections(snap)
 
-	sections := [][]byte{stringSection, nodeSection}
+	sections := [][]byte{stringSection, pageMetaSection, nodeSection}
 	if len(layoutSection) > 0 {
 		sections = append(sections, layoutSection)
 	}
@@ -83,6 +85,7 @@ func (e *encoder) encode(snap *minidom.PageSnapshot) ([]byte, error) {
 
 func (e *encoder) internNodeStrings(n *minidom.Node) {
 	e.internString(n.Text)
+	e.internString(n.ResourceID)
 	if n.Interaction != nil {
 		e.internString(n.Interaction.Href)
 		e.internString(n.Interaction.Value)
@@ -95,6 +98,14 @@ func (e *encoder) internNodeStrings(n *minidom.Node) {
 	for _, v := range n.Attrs {
 		e.internString(v)
 	}
+}
+
+func (e *encoder) buildPageMetaSection(snap *minidom.PageSnapshot) []byte {
+	var data bytes.Buffer
+	data.Write(AppendVarint(nil, e.internString(snap.URL)))
+	data.Write(AppendVarint(nil, e.internString(snap.Title)))
+	data.Write(AppendVarint(nil, e.internString(snap.FaviconURL)))
+	return wrapSection(proto.SectionPageMeta, data.Bytes())
 }
 
 func (e *encoder) buildStringSection() []byte {
@@ -147,6 +158,10 @@ func (e *encoder) buildNodeSections(snap *minidom.PageSnapshot) (nodeTree, layou
 			layoutBuf.Write(AppendVarint(nil, floatToFixed(n.Layout.W)))
 			layoutBuf.Write(AppendVarint(nil, floatToFixed(n.Layout.H)))
 			layoutCount++
+		}
+
+		if n.ResourceID != "" {
+			nodeBuf.Write(AppendVarint(nil, e.internString(n.ResourceID)))
 		}
 
 		if n.Interaction != nil {

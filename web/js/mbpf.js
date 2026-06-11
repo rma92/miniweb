@@ -5,10 +5,11 @@
 
 window.MBPFDecoder = (function() {
 
-  const SECTION_STRING_TABLE = 1;
-  const SECTION_NODE_TREE    = 4;
-  const SECTION_LAYOUT_TABLE = 5;
-  const SECTION_INTERACTION  = 6;
+  const SECTION_STRING_TABLE  = 1;
+  const SECTION_PAGE_META     = 2;
+  const SECTION_NODE_TREE     = 4;
+  const SECTION_LAYOUT_TABLE  = 5;
+  const SECTION_INTERACTION   = 6;
   const SECTION_RESOURCE_TABLE = 7;
 
   const NODE_TYPES = [
@@ -97,14 +98,30 @@ window.MBPFDecoder = (function() {
     const nodes = sections[SECTION_NODE_TREE]
       ? decodeNodeTree(sections[SECTION_NODE_TREE], str, layouts, interactions) : [];
 
+    let url = '', title = '', faviconURL = '';
+    if (sections[SECTION_PAGE_META]) {
+      const pm = decodePageMeta(sections[SECTION_PAGE_META], str);
+      url = pm.url; title = pm.title; faviconURL = pm.favicon_url;
+    }
+
     return {
       format: 'minidom-text', // expose same shape as JSON decoder
       version: 1,
       snapshot_id: snapshotID,
-      url: '',
-      title: '',
+      url,
+      title,
+      favicon_url: faviconURL,
       nodes,
       resources,
+    };
+  }
+
+  function decodePageMeta(buf, str) {
+    const r = new Reader(buf);
+    return {
+      url:        str(r.readVarint()),
+      title:      str(r.readVarint()),
+      favicon_url: str(r.readVarint()),
     };
   }
 
@@ -208,6 +225,9 @@ window.MBPFDecoder = (function() {
       if (flags & 1) {
         const layoutIdx = r.readVarint();
         if (layoutIdx < layouts.length) node.layout = layouts[layoutIdx];
+      }
+      if (flags & 4) {
+        node.resource_id = str(r.readVarint());
       }
       if (flags & 2) {
         const interIdx = r.readVarint();

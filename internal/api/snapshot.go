@@ -78,8 +78,8 @@ func (h *snapshotHandler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Always offer both gzip and brotli; negotiate based on client's Accept-Encoding.
-	allowed := []string{compress.AlgoGzip, compress.AlgoBrotli}
+	// Offer all supported compression algorithms; client's Accept-Encoding decides.
+	allowed := []string{compress.AlgoZstd, compress.AlgoGzip, compress.AlgoBrotli}
 	algo := compress.Negotiate(r.Header.Get("Accept-Encoding"), allowed)
 
 	if algo != compress.AlgoNone {

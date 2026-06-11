@@ -95,6 +95,20 @@ func Decode(data []byte) (*minidom.PageSnapshot, error) {
 		}
 	}
 
+	// Decode page metadata (URL, title, favicon_url).
+	if md, ok := rawSections[proto.SectionPageMeta]; ok {
+		mr := bytes.NewReader(md)
+		if urlIdx, e2 := ReadVarint(mr); e2 == nil {
+			snap.URL = str(urlIdx)
+		}
+		if titleIdx, e2 := ReadVarint(mr); e2 == nil {
+			snap.Title = str(titleIdx)
+		}
+		if faviconIdx, e2 := ReadVarint(mr); e2 == nil {
+			snap.FaviconURL = str(faviconIdx)
+		}
+	}
+
 	// Decode resource table.
 	var resources []minidom.ResourceRef
 	if rd, ok := rawSections[proto.SectionResourceTable]; ok {
@@ -265,6 +279,10 @@ func decodeNodeTree(data []byte, str func(uint64) string, layouts []minidom.Layo
 				lb := layouts[layoutIdx]
 				n.Layout = &lb
 			}
+		}
+		if flags&4 != 0 { // has resource_id (written before interaction)
+			resIdx, _ := ReadVarint(r)
+			n.ResourceID = str(resIdx)
 		}
 		if flags&2 != 0 { // has interaction
 			interIdx, _ := ReadVarint(r)

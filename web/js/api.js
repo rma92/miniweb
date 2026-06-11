@@ -102,9 +102,10 @@ window.MiniAPI = (function() {
   }
 
   function interact(sessionID, tabID, snapshotID, event) {
+    const s = Settings.get();
     return request('POST',
       `/api/v1/sessions/${sessionID}/tabs/${tabID}/interact`,
-      { snapshot_id: snapshotID, event }
+      { snapshot_id: snapshotID, rendering_profile: s.renderingProfile || 'box', event }
     );
   }
 

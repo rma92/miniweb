@@ -5,6 +5,27 @@
 
 window.MiniRenderer = (function() {
 
+  // Shared IntersectionObserver for lazy-loading proxied images.
+  // Defers setting el.src until the element is near the viewport.
+  let lazyObserver = null;
+  function getLazyObserver() {
+    if (!lazyObserver && typeof IntersectionObserver !== 'undefined') {
+      lazyObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const el = entry.target;
+            if (el.dataset.lazySrc) {
+              el.src = el.dataset.lazySrc;
+              delete el.dataset.lazySrc;
+            }
+            lazyObserver.unobserve(el);
+          }
+        }
+      }, { rootMargin: '200px' });
+    }
+    return lazyObserver;
+  }
+
   // render(snap, container, onInteract, getResourceURL)
   // getResourceURL(resourceID) → URL string routed through the server proxy.
   // If omitted, images are rendered as broken (no external URLs ever used directly).
@@ -118,17 +139,21 @@ window.MiniRenderer = (function() {
         el = document.createElement('img');
         el.className = 'mn-image';
         el.alt = node.text || '';
-        el.loading = 'lazy';
         if (node.resource_id && getResourceURL) {
-          // Route through server proxy — never fetch external URLs directly.
-          el.src = getResourceURL(node.resource_id);
+          // Lazy-load: defer src assignment until near the viewport.
+          const proxyURL = getResourceURL(node.resource_id);
+          const obs = getLazyObserver();
+          if (obs) {
+            el.dataset.lazySrc = proxyURL;
+            obs.observe(el);
+          } else {
+            el.src = proxyURL;
+          }
         } else if (node.attrs && node.attrs.src &&
                    node.attrs.src.startsWith('data:')) {
-          // Inline data URIs are safe to use directly.
           el.src = node.attrs.src;
         }
-        // If neither condition is met the img remains broken — that's intentional:
-        // external URLs must always be proxied through the server.
+        // No external URL fallback — intentional.
         break;
       }
 

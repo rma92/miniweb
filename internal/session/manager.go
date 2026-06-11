@@ -19,7 +19,7 @@ type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	worker   browser.BrowserWorker
-	cfg      *config.Config
+	cfg      atomic.Pointer[config.Config]
 	snapSeq  atomic.Int64 // global snapshot ID counter
 }
 
@@ -28,10 +28,15 @@ func NewManager(ctx context.Context, worker browser.BrowserWorker, cfg *config.C
 	m := &Manager{
 		sessions: make(map[string]*Session),
 		worker:   worker,
-		cfg:      cfg,
 	}
+	m.cfg.Store(cfg)
 	go m.expiryLoop(ctx)
 	return m
+}
+
+// UpdateConfig atomically replaces the manager's config (used for SIGHUP reload).
+func (m *Manager) UpdateConfig(cfg *config.Config) {
+	m.cfg.Store(cfg)
 }
 
 // CreateSession creates a new session for the given user and device profile.
@@ -71,8 +76,9 @@ func (m *Manager) GetSession(id, userID string) (*Session, error) {
 
 // OpenTab opens a new tab in the session and navigates to url.
 func (m *Manager) OpenTab(sess *Session, url string) (*Tab, error) {
-	if m.cfg.Session.MaxTabs > 0 && len(sess.TabIDs()) >= m.cfg.Session.MaxTabs {
-		return nil, fmt.Errorf("maximum tabs per session (%d) reached", m.cfg.Session.MaxTabs)
+	cfg := m.cfg.Load()
+	if cfg.Session.MaxTabs > 0 && len(sess.TabIDs()) >= cfg.Session.MaxTabs {
+		return nil, fmt.Errorf("maximum tabs per session (%d) reached", cfg.Session.MaxTabs)
 	}
 
 	handle, err := m.worker.OpenTab(sess.Handle, url)
@@ -236,7 +242,7 @@ func (m *Manager) expiryLoop(ctx context.Context) {
 }
 
 func (m *Manager) reapExpired() {
-	timeout := m.cfg.Session.IdleTimeout
+	timeout := m.cfg.Load().Session.IdleTimeout
 	if timeout <= 0 {
 		return
 	}

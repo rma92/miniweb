@@ -8,19 +8,19 @@ const Version = 1
 
 // Section type IDs.
 const (
-	SectionStringTable    = 1
-	SectionTagTable       = 2
-	SectionStyleTable     = 3
-	SectionNodeTree       = 4
-	SectionLayoutTable    = 5
-	SectionInteraction    = 6
-	SectionResourceTable  = 7
-	SectionImageTable     = 8
-	SectionFormState      = 9
-	SectionScrollState    = 10
+	SectionStringTable       = 1
+	SectionPageMeta          = 2  // URL, title, favicon_url
+	SectionStyleTable        = 3
+	SectionNodeTree          = 4
+	SectionLayoutTable       = 5
+	SectionInteraction       = 6
+	SectionResourceTable     = 7
+	SectionImageTable        = 8
+	SectionFormState         = 9
+	SectionScrollState       = 10
 	SectionDeltaInstructions = 11
-	SectionArchiveMeta    = 12
-	SectionDebugInfo      = 13
+	SectionArchiveMeta       = 12
+	SectionDebugInfo         = 13
 )
 
 // Node type IDs — must stay stable across versions.

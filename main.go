@@ -73,6 +73,18 @@ func main() {
 		}
 	}()
 
+	// SIGHUP reloads config (idle timeout, tab limits, etc.) without restart.
+	reload := make(chan os.Signal, 1)
+	signal.Notify(reload, syscall.SIGHUP)
+	go func() {
+		for range reload {
+			newCfg := config.Load()
+			mgr.UpdateConfig(newCfg)
+			log.Printf("config reloaded (idle_timeout=%s, max_tabs=%d)",
+				newCfg.Session.IdleTimeout, newCfg.Session.MaxTabs)
+		}
+	}()
+
 	// Graceful shutdown on SIGINT / SIGTERM.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -80,6 +92,8 @@ func main() {
 
 	log.Println("shutting down...")
 	cancel() // stop expiry loop
+	signal.Stop(reload)
+	close(reload)
 
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutCancel()
