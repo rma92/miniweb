@@ -85,6 +85,7 @@ func (e *encoder) encode(snap *minidom.PageSnapshot) ([]byte, error) {
 
 func (e *encoder) internNodeStrings(n *minidom.Node) {
 	e.internString(n.Text)
+	e.internString(n.StableID)
 	e.internString(n.ResourceID)
 	if n.Interaction != nil {
 		e.internString(n.Interaction.Href)
@@ -149,6 +150,7 @@ func (e *encoder) buildNodeSections(snap *minidom.PageSnapshot) (nodeTree, layou
 		nodeBuf.Write(AppendVarint(nil, flags))
 		nodeBuf.Write(AppendVarint(nil, uint64(n.ParentID)))
 		nodeBuf.Write(AppendVarint(nil, e.internString(n.Text)))
+		nodeBuf.Write(AppendVarint(nil, e.internString(n.StableID)))
 
 		if n.Layout != nil {
 			nodeBuf.Write(AppendVarint(nil, layoutCount))

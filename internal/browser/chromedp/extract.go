@@ -40,7 +40,7 @@ try {
   var interactionCounter = 1;
   var nodeCounter = 1;
   var nodes = [];
-
+  var siblingCounters = {};` + jsStableIDFn + `
   function getLayout(el) {
     try {
       var r = el.getBoundingClientRect();
@@ -60,8 +60,15 @@ try {
     return (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 512);
   }
 
-  var root = {id: nodeCounter++, type: 'DOCUMENT', parent_id: 0};
+  var rootSID = stableID('DOCUMENT', '', 1);
+  var root = {id: nodeCounter++, stable_id: rootSID, type: 'DOCUMENT', parent_id: 0};
   nodes.push(root);
+
+  function makeSID(type) {
+    var key = rootSID + ':' + type;
+    siblingCounters[key] = (siblingCounters[key] || 0) + 1;
+    return stableID(type, rootSID, siblingCounters[key]);
+  }
 
   function walk(el, depth) {
     if (!el || el.nodeType !== 1) return;
@@ -76,7 +83,7 @@ try {
       type = 'HEADING';
       var text = collectText(el);
       if (!text) return;
-      node = {id: nodeCounter++, type: type, parent_id: root.id,
+      node = {id: nodeCounter++, stable_id: makeSID(type), type: type, parent_id: root.id,
               text: text, layout: getLayout(el)};
       var px = parseFloat(window.getComputedStyle(el).fontSize) || 16;
       node.style = {font_size: px + 'px', font_weight: '700'};
@@ -84,7 +91,7 @@ try {
     } else if (tag === 'p' || tag === 'blockquote') {
       var text = collectText(el);
       if (!text) return;
-      node = {id: nodeCounter++, type: 'BLOCK', parent_id: root.id,
+      node = {id: nodeCounter++, stable_id: makeSID('BLOCK'), type: 'BLOCK', parent_id: root.id,
               text: text, layout: getLayout(el)};
 
     } else if (tag === 'img') {
@@ -95,14 +102,14 @@ try {
       var h = el.naturalHeight || el.height;
       if (w) attrs.width = String(w);
       if (h) attrs.height = String(h);
-      node = {id: nodeCounter++, type: 'IMAGE', parent_id: root.id,
+      node = {id: nodeCounter++, stable_id: makeSID('IMAGE'), type: 'IMAGE', parent_id: root.id,
               text: el.alt || '', layout: getLayout(el), attrs: attrs};
 
     } else if (tag === 'a') {
       var text = collectText(el);
       if (!text) return;
       var href = el.href || el.getAttribute('href') || '';
-      node = {id: nodeCounter++, type: 'LINK', parent_id: root.id,
+      node = {id: nodeCounter++, stable_id: makeSID('LINK'), type: 'LINK', parent_id: root.id,
               text: text, layout: getLayout(el),
               interaction: {element_id: interactionCounter++, kind: 'link',
                             enabled: true, href: href, action_hint: 'click'}};
@@ -110,7 +117,7 @@ try {
     } else if (tag === 'li') {
       var text = collectText(el);
       if (!text) return;
-      node = {id: nodeCounter++, type: 'LIST_ITEM', parent_id: root.id,
+      node = {id: nodeCounter++, stable_id: makeSID('LIST_ITEM'), type: 'LIST_ITEM', parent_id: root.id,
               text: text, layout: getLayout(el)};
 
     } else if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') {
@@ -122,7 +129,7 @@ try {
                : tag === 'select' ? 'SELECT' : 'BUTTON';
       var kind = ntype.toLowerCase();
       var hint = (tag === 'button' || itype === 'submit') ? 'click' : 'type';
-      node = {id: nodeCounter++, type: ntype, parent_id: root.id,
+      node = {id: nodeCounter++, stable_id: makeSID(ntype), type: ntype, parent_id: root.id,
               text: collectText(el), layout: getLayout(el),
               interaction: {element_id: interactionCounter++, kind: kind,
                             enabled: !el.disabled, readonly: !!el.readOnly,
@@ -156,6 +163,21 @@ try {
 }
 })()`
 
+// jsStableID is a shared JS snippet that provides the djb2-based stableID function.
+// stableID(nodeType, parentStableID, siblingIndex) → 8-char hex string.
+const jsStableIDFn = `
+  function djb2(s) {
+    var h = 5381;
+    for (var i = 0; i < s.length; i++) {
+      h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0;
+    }
+    return ('00000000' + h.toString(16)).slice(-8);
+  }
+  function stableID(type, parentSID, sibIdx) {
+    return djb2(type + ':' + parentSID + ':' + sibIdx);
+  }
+`
+
 // jsExtractor is injected into the page and walks the live DOM post-render.
 // It returns a JSON object with {title, url, nodes} where each node has
 // id, type, parentId, text, attrs, layout, style, and interaction fields.
@@ -165,7 +187,7 @@ try {
   var nodeCounter = 1;
   var nodes = [];
   var nodeMap = new Map(); // element -> nodeId
-
+  var stableMap = new Map(); // element -> stableID` + jsStableIDFn + `
   function classifyTag(el) {
     var tag = el.tagName ? el.tagName.toLowerCase() : '';
     if (/^h[1-6]$/.test(tag)) return 'HEADING';
@@ -304,18 +326,28 @@ try {
     return Object.keys(attrs).length ? attrs : null;
   }
 
-  function processElement(el, parentId) {
+  // siblingCounters tracks how many children of each nodeType a parent has seen.
+  // Key: parentStableID + ":" + nodeType → count
+  var siblingCounters = {};
+
+  function processElement(el, parentId, parentSID) {
     if (el.nodeType !== 1) return; // only Element nodes
     if (!isVisible(el)) return;
 
     var nodeType = classifyTag(el);
     if (!nodeType) return;
 
+    var scKey = parentSID + ':' + nodeType;
+    siblingCounters[scKey] = (siblingCounters[scKey] || 0) + 1;
+    var sid = stableID(nodeType, parentSID, siblingCounters[scKey]);
+
     var id = nodeCounter++;
     nodeMap.set(el, id);
+    stableMap.set(el, sid);
 
     var node = {
       id: id,
+      stable_id: sid,
       type: nodeType,
       parent_id: parentId,
       text: getText(el, nodeType),
@@ -334,18 +366,20 @@ try {
     // Recurse into children (skip image/input/textarea internals)
     if (nodeType !== 'IMAGE' && nodeType !== 'INPUT' && nodeType !== 'TEXTAREA') {
       el.childNodes.forEach(function(child) {
-        if (child.nodeType === 1) processElement(child, id);
+        if (child.nodeType === 1) processElement(child, id, sid);
       });
     }
   }
 
   // Start from document root
-  var root = {id: nodeCounter++, type: 'DOCUMENT', parent_id: 0, children: []};
+  var rootSID = stableID('DOCUMENT', '', 1);
+  var root = {id: nodeCounter++, stable_id: rootSID, type: 'DOCUMENT', parent_id: 0, children: []};
   nodes.push(root);
   nodeMap.set(document.documentElement, root.id);
+  stableMap.set(document.documentElement, rootSID);
 
   document.body && document.body.childNodes.forEach(function(child) {
-    if (child.nodeType === 1) processElement(child, root.id);
+    if (child.nodeType === 1) processElement(child, root.id, rootSID);
   });
 
   return JSON.stringify({
@@ -361,6 +395,7 @@ try {
 // rawNode is the raw JSON structure returned by the JS extractor.
 type rawNode struct {
 	ID          int                `json:"id"`
+	StableID    string             `json:"stable_id"`
 	Type        string             `json:"type"`
 	ParentID    int                `json:"parent_id"`
 	Text        string             `json:"text"`
@@ -419,6 +454,7 @@ func extractCurrentWithJS(ctx context.Context, jsCode string) (*minidom.PageSnap
 	for _, rn := range result.Nodes {
 		n := minidom.Node{
 			ID:          rn.ID,
+			StableID:    rn.StableID,
 			Type:        minidom.NodeType(rn.Type),
 			ParentID:    rn.ParentID,
 			Text:        rn.Text,

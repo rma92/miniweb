@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/user/miniweb/internal/auth"
 	"github.com/user/miniweb/internal/config"
+	"github.com/user/miniweb/internal/metrics"
 	"github.com/user/miniweb/internal/session"
 )
 
@@ -18,6 +19,10 @@ func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, 
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
+	r.Use(metrics.Middleware)
+
+	// Prometheus metrics endpoint (unauthenticated by design — same as most infra).
+	r.Handle("/metrics", metrics.Handler())
 
 	// Apply auth middleware to API routes only.
 	r.Route("/api/v1", func(r chi.Router) {

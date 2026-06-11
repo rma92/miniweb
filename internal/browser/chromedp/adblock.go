@@ -10,6 +10,7 @@ import (
 	"github.com/chromedp/cdproto/network"
 	cdp2 "github.com/chromedp/chromedp"
 	"github.com/user/miniweb/internal/adblock"
+	"github.com/user/miniweb/internal/metrics"
 )
 
 // enableAdBlocking wires up CDP Fetch.enable on the given tab context.
@@ -30,6 +31,7 @@ func enableAdBlocking(ctx context.Context, matcher *adblock.Matcher, enabled *at
 			}
 			execCtx := cdp.WithExecutor(ctx, c.Target)
 			if enabled.Load() && matcher.ShouldBlock(e.Request.URL) {
+				metrics.AdBlockBlocked.Inc()
 				if err := fetch.FailRequest(e.RequestID, network.ErrorReasonBlockedByClient).Do(execCtx); err != nil {
 					// Tab may already be closing; suppress noise.
 					log.Printf("adblock: failRequest: %v", err)

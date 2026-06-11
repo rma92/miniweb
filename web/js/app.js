@@ -203,7 +203,8 @@
 
     setLoading(true);
     try {
-      const snap = await MiniAPI.getSnapshot(state.sessionID, tab.tabID);
+      const snap = await MiniAPI.getSnapshot(state.sessionID, tab.tabID, tab.snapID || 0);
+      if (!snap) { return; } // null means delta without base; caller should retry
       tab.snap   = snap;
       tab.snapID = snap.snapshot_id || 0;
       const newURL = snap.url || tab.url;

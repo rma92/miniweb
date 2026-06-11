@@ -69,7 +69,52 @@ window.MiniAPI = (function() {
     return request('POST', `/api/v1/sessions/${sessionID}/tabs/${tabID}/navigate`, { url });
   }
 
-  async function getSnapshot(sessionID, tabID) {
+  // _lastSnaps caches {[sessionID+tabID]: snapshot} for delta application.
+  const _lastSnaps = {};
+
+  function _snapKey(sessionID, tabID) { return sessionID + '/' + tabID; }
+
+  function _applyDelta(baseSnap, delta) {
+    const nodeMap = new Map();
+    for (const n of (baseSnap.nodes || [])) {
+      if (n.stable_id) nodeMap.set(n.stable_id, Object.assign({}, n));
+    }
+    for (const inst of (delta.instructions || [])) {
+      switch (inst.op) {
+        case 1: case 3: // ADD or UPDATE
+          if (inst.node) nodeMap.set(inst.stable_id, inst.node);
+          break;
+        case 2: // REMOVE
+          nodeMap.delete(inst.stable_id);
+          break;
+      }
+    }
+    // Rebuild ordered list: base order first, then added nodes.
+    const seen = new Set();
+    const nodes = [];
+    for (const bn of (baseSnap.nodes || [])) {
+      if (!bn.stable_id) continue;
+      const n = nodeMap.get(bn.stable_id);
+      if (n) { nodes.push(n); seen.add(bn.stable_id); }
+    }
+    for (const inst of (delta.instructions || [])) {
+      if (inst.op === 1 && !seen.has(inst.stable_id) && inst.node) {
+        nodes.push(inst.node);
+      }
+    }
+    return {
+      format: baseSnap.format,
+      version: baseSnap.version,
+      snapshot_id: delta.snapshot_id,
+      url: delta.url || baseSnap.url,
+      title: delta.title || baseSnap.title,
+      favicon_url: delta.favicon_url || baseSnap.favicon_url,
+      nodes,
+      resources: baseSnap.resources,
+    };
+  }
+
+  async function getSnapshot(sessionID, tabID, lastSnapID) {
     const s = Settings.get();
     const base = Settings.apiBase();
     const headers = Settings.authHeaders();
@@ -78,15 +123,21 @@ window.MiniAPI = (function() {
     if (useMBPF) {
       headers['Accept'] = 'application/x-mbpf';
     } else {
-      headers['Accept'] = 'application/minidom+json';
+      headers['Accept'] = 'application/minidom+json, application/minidom-delta+json';
     }
     headers['Accept-Encoding'] = 'gzip, br';
 
     const rendering = s.renderingProfile || 'box';
-    const res = await fetch(
-      `${base}/api/v1/sessions/${sessionID}/tabs/${tabID}/snapshot?rendering=${rendering}`,
-      { headers }
-    );
+    const key = _snapKey(sessionID, tabID);
+    const cachedSnap = _lastSnaps[key];
+
+    // Build URL with optional since= for delta requests.
+    let url = `${base}/api/v1/sessions/${sessionID}/tabs/${tabID}/snapshot?rendering=${rendering}`;
+    if (lastSnapID && cachedSnap && cachedSnap.snapshot_id === lastSnapID) {
+      url += `&since=${lastSnapID}`;
+    }
+
+    const res = await fetch(url, { headers });
     if (!res.ok) {
       let msg = res.statusText;
       try { const j = await res.json(); msg = j.error || msg; } catch(e) {}
@@ -94,17 +145,29 @@ window.MiniAPI = (function() {
     }
 
     const snapshotID = parseInt(res.headers.get('X-Snapshot-Id') || '0', 10);
+    const ct = res.headers.get('Content-Type') || '';
 
-    if (useMBPF) {
+    let snap;
+    if (ct.includes('application/minidom-delta+json')) {
+      const delta = await res.json();
+      if (cachedSnap) {
+        snap = _applyDelta(cachedSnap, delta);
+      } else {
+        // Delta without base — fall back to full snapshot on next call.
+        snap = null;
+      }
+    } else if (useMBPF) {
       const buf = await res.arrayBuffer();
-      const snap = MBPFDecoder.decode(buf);
-      snap.snapshot_id = snapshotID;
-      return snap;
+      snap = MBPFDecoder.decode(buf);
     } else {
-      const snap = await res.json();
-      snap.snapshot_id = snapshotID;
-      return snap;
+      snap = await res.json();
     }
+
+    if (snap) {
+      snap.snapshot_id = snapshotID;
+      _lastSnaps[key] = snap;
+    }
+    return snap;
   }
 
   function interact(sessionID, tabID, snapshotID, event) {

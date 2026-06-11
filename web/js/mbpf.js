@@ -208,14 +208,16 @@ window.MBPFDecoder = (function() {
     const idxByID = {};
 
     for (let i = 0; i < count; i++) {
-      const id       = r.readVarint();
-      const typeID   = r.readVarint();
-      const flags    = r.readVarint();
-      const parentID = r.readVarint();
-      const textIdx  = r.readVarint();
+      const id        = r.readVarint();
+      const typeID    = r.readVarint();
+      const flags     = r.readVarint();
+      const parentID  = r.readVarint();
+      const textIdx   = r.readVarint();
+      const stableIdx = r.readVarint();
 
       const node = {
         id,
+        stable_id: str(stableIdx),
         type:      NODE_TYPES[typeID] || 'UNKNOWN',
         parent_id: parentID,
         text:      str(textIdx),

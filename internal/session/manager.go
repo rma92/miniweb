@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/user/miniweb/internal/browser"
 	"github.com/user/miniweb/internal/config"
+	"github.com/user/miniweb/internal/metrics"
 	"github.com/user/miniweb/internal/minidom"
 )
 
@@ -53,6 +54,7 @@ func (m *Manager) CreateSession(userID string, profile browser.DeviceProfile) (*
 	m.sessions[id] = sess
 	m.mu.Unlock()
 
+	metrics.ActiveSessions.Inc()
 	return sess, nil
 }
 
@@ -147,6 +149,19 @@ func (m *Manager) Interact(sess *Session, tabID string, event browser.Interactio
 	return nil
 }
 
+// GetLastSnap returns the last snapshot for a tab if its ID matches sinceID.
+// Used by the delta snapshot path to retrieve the base for diffing.
+func (m *Manager) GetLastSnap(sess *Session, tabID string, sinceID int) *minidom.PageSnapshot {
+	tab, ok := sess.getTab(tabID)
+	if !ok || tab.LastSnap == nil {
+		return nil
+	}
+	if tab.LastSnap.SnapshotID != sinceID {
+		return nil
+	}
+	return tab.LastSnap
+}
+
 // GetResource returns image bytes for a resource in the tab's last snapshot.
 func (m *Manager) GetResource(sess *Session, tabID, resourceID string) (*minidom.ResourceRef, error) {
 	tab, ok := sess.getTab(tabID)
@@ -236,6 +251,7 @@ func (m *Manager) DeleteSession(id, userID string) error {
 	sess.State = StateDead
 	sess.mu.Unlock()
 
+	metrics.ActiveSessions.Dec()
 	return m.worker.DestroySession(sess.Handle)
 }
 

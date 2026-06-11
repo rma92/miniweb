@@ -72,6 +72,7 @@ type ResourceRef struct {
 // Node is a single element in the MiniDOM tree.
 type Node struct {
 	ID          int              `json:"id"`
+	StableID    string           `json:"stable_id,omitempty"` // content-hash of structural path; stable across renders
 	Type        NodeType         `json:"type"`
 	ParentID    int              `json:"parent_id,omitempty"`
 	Children    []int            `json:"children,omitempty"`

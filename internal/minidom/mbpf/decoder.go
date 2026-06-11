@@ -261,13 +261,15 @@ func decodeNodeTree(data []byte, str func(uint64) string, layouts []minidom.Layo
 		nodeTypeID, _ := ReadVarint(r)
 		flags, _ := ReadVarint(r)
 		parentID, _ := ReadVarint(r)
-		textIdx, err := ReadVarint(r)
+		textIdx, _ := ReadVarint(r)
+		stableIdx, err := ReadVarint(r)
 		if err != nil {
 			return nil, err
 		}
 
 		n := minidom.Node{
 			ID:       int(nodeID),
+			StableID: str(stableIdx),
 			Type:     nodeIDToType(int(nodeTypeID)),
 			ParentID: int(parentID),
 			Text:     str(textIdx),
