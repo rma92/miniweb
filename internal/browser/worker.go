@@ -21,13 +21,20 @@ type DeviceProfile struct {
 	AcceptLanguage    string  `json:"accept_language"`
 }
 
+// FormValue carries a single input-field value to be applied before an event.
+type FormValue struct {
+	ElementID int    `json:"element_id"`
+	Value     string `json:"value"`
+}
+
 // InteractionEvent describes a user interaction to replay on the remote browser.
 type InteractionEvent struct {
-	Type      string `json:"type"`       // click, input, change, submit, scroll, ...
-	ElementID int    `json:"element_id"`
-	Value     string `json:"value,omitempty"`
-	ScrollX   int    `json:"scroll_x,omitempty"`
-	ScrollY   int    `json:"scroll_y,omitempty"`
+	Type       string      `json:"type"`       // click, input, change, submit, scroll, ...
+	ElementID  int         `json:"element_id"`
+	Value      string      `json:"value,omitempty"`
+	ScrollX    int         `json:"scroll_x,omitempty"`
+	ScrollY    int         `json:"scroll_y,omitempty"`
+	FormValues []FormValue `json:"form_values,omitempty"` // inputs to pre-fill before event
 }
 
 // SnapshotOptions controls the format and fidelity of a page snapshot.

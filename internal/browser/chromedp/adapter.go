@@ -292,6 +292,15 @@ func (w *Worker) Interact(tab browser.TabHandle, event browser.InteractionEvent)
 		return fmt.Errorf("no snapshot available for tab %s; call Snapshot first", tab)
 	}
 
+	// Pre-fill any bundled input values before executing the main event.
+	// This allows the client to send a click and form values atomically,
+	// avoiding the race where the click reaches the server before the value.
+	for _, fv := range event.FormValues {
+		if err := SetInputValue(t.ctx, fv.ElementID, fv.Value, snap); err != nil {
+			log.Printf("pre-fill element %d: %v", fv.ElementID, err)
+		}
+	}
+
 	switch event.Type {
 	case "click", "tap":
 		return ClickElement(t.ctx, event.ElementID, snap)

@@ -113,12 +113,45 @@ Content-Type: application/json
 {"url": "https://example.com"}
 ```
 
-Response `200 {"status": "ok"}`.
+Optional field `"async": true` returns 202 immediately and navigates in the
+background. Completion (or failure) is pushed to the tab's SSE stream (see
+**Tab Events** below). When `async` is omitted or `false`, the request blocks
+until the page is loaded.
 
-Error responses:
+Response `200 {"status": "ok"}` (synchronous) or `202 {"status": "navigating"}` (async).
+
+Error responses (synchronous only):
 - `504` on navigation timeout
 - `502` on DNS/connection failure (body includes `"code"` field: `dns_failure`,
   `connection_refused`, `connection_timeout`, `tls_error`, `offline`, etc.)
+
+### Tab Events (SSE)
+
+```
+GET /api/v1/sessions/{session_id}/tabs/{tab_id}/events
+```
+
+Upgrades to a Server-Sent Events stream. The server pushes a JSON event
+whenever an async navigation completes or fails:
+
+```
+data: {"type":"ready","url":"https://example.com"}
+
+data: {"type":"error","message":"DNS lookup failed: no-such.host"}
+
+: heartbeat
+```
+
+Event types:
+- `ready` — async navigation completed; client should call `GET /snapshot`
+- `error` — async navigation failed; `message` describes the failure
+
+A comment-only heartbeat line is sent every 25 seconds to keep the connection
+alive through proxies. The stream stays open until the client disconnects or
+the session is deleted.
+
+**Authentication:** `EventSource` cannot set custom headers, so when auth is
+enabled pass the token as `?token=<value>` query parameter.
 
 ---
 

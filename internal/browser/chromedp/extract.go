@@ -335,7 +335,13 @@ try {
     if (!isVisible(el)) return;
 
     var nodeType = classifyTag(el);
-    if (!nodeType) return;
+    if (!nodeType) {
+      // Unknown element: don't emit a node, but recurse so children are not lost.
+      el.childNodes.forEach(function(child) {
+        if (child.nodeType === 1) processElement(child, parentId, parentSID);
+      });
+      return;
+    }
 
     var scKey = parentSID + ':' + nodeType;
     siblingCounters[scKey] = (siblingCounters[scKey] || 0) + 1;

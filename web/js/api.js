@@ -73,6 +73,28 @@ window.MiniAPI = (function() {
     return request('POST', `/api/v1/sessions/${sessionID}/tabs/${tabID}/navigate`, { url });
   }
 
+  // navigateAsync sends an async navigate (returns 202 immediately).
+  // Completion is delivered via the tab's SSE stream.
+  function navigateAsync(sessionID, tabID, url) {
+    return request('POST', `/api/v1/sessions/${sessionID}/tabs/${tabID}/navigate`, { url, async: true });
+  }
+
+  // subscribeTabEvents opens an SSE connection for the given tab.
+  // onEvent is called with each parsed event object.
+  // Returns an object with a close() method.
+  function subscribeTabEvents(sessionID, tabID, onEvent) {
+    const base = Settings.apiBase();
+    const s = Settings.get();
+    let url = `${base}/api/v1/sessions/${sessionID}/tabs/${tabID}/events`;
+    if (s.authToken) url += '?token=' + encodeURIComponent(s.authToken);
+
+    const es = new EventSource(url);
+    es.onmessage = function(e) {
+      try { onEvent(JSON.parse(e.data)); } catch(err) {}
+    };
+    return { close: function() { es.close(); } };
+  }
+
   // _lastSnaps caches {[sessionID+tabID]: snapshot} for delta application.
   const _lastSnaps = {};
 
@@ -222,6 +244,8 @@ window.MiniAPI = (function() {
     createTab,
     closeTab,
     navigate,
+    navigateAsync,
+    subscribeTabEvents,
     getSnapshot,
     interact,
     getResource,

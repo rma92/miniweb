@@ -194,6 +194,11 @@ func (m *Manager) OpenTab(sess *Session, url string) (*Tab, error) {
 	return tab, nil
 }
 
+// GetTab returns a tab from a session. Exposed for use in the api package.
+func (m *Manager) GetTab(sess *Session, tabID string) (*Tab, bool) {
+	return sess.getTab(tabID)
+}
+
 // Navigate navigates a tab to a new URL.
 func (m *Manager) Navigate(sess *Session, tabID, url string) error {
 	tab, ok := sess.getTab(tabID)
@@ -207,6 +212,29 @@ func (m *Manager) Navigate(sess *Session, tabID, url string) error {
 	sess.touch()
 	m.persistSession(sess)
 	return nil
+}
+
+// NavigateAsync starts navigation in a background goroutine and returns
+// immediately. Completion is signalled by a TabEvent pushed to the tab's
+// subscribers. The caller should have an SSE stream open to receive it.
+func (m *Manager) NavigateAsync(sess *Session, tabID, url string) error {
+	tab, ok := sess.getTab(tabID)
+	if !ok {
+		return ErrNotFound
+	}
+	go m.doNavigateAsync(sess, tab, url)
+	return nil
+}
+
+func (m *Manager) doNavigateAsync(sess *Session, tab *Tab, url string) {
+	if err := m.worker.Navigate(tab.Handle, url); err != nil {
+		tab.publish(TabEvent{Type: "error", Message: err.Error()})
+		return
+	}
+	tab.CurrentURL = url
+	sess.touch()
+	m.persistSession(sess)
+	tab.publish(TabEvent{Type: "ready", URL: url})
 }
 
 // Snapshot extracts the current page snapshot for a tab.

@@ -67,10 +67,22 @@ func (h *tabsHandler) navigate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		URL string `json:"url"`
+		URL   string `json:"url"`
+		Async bool   `json:"async"` // true = return 202 immediately; result via SSE
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.URL == "" {
 		writeError(w, "url required", http.StatusBadRequest)
+		return
+	}
+
+	if body.Async {
+		if err := h.mgr.NavigateAsync(sess, tabID, body.URL); err != nil {
+			writeError(w, err.Error(), statusForSessionErr(err))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]string{"status": "navigating"})
 		return
 	}
 

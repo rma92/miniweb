@@ -51,6 +51,9 @@ func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, 
 		snapH := &snapshotHandler{mgr: mgr, cfg: cfg}
 		r.Get("/sessions/{sessionID}/tabs/{tabID}/snapshot", snapH.get)
 
+		evH := &eventsHandler{mgr: mgr}
+		r.Get("/sessions/{sessionID}/tabs/{tabID}/events", evH.stream)
+
 		intH := &interactHandler{mgr: mgr}
 		r.Post("/sessions/{sessionID}/tabs/{tabID}/interact", intH.post)
 

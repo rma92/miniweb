@@ -86,6 +86,10 @@
   }
 
   async function clearSession() {
+    for (const tab of state.tabs) {
+      if (tab.eventSub) { tab.eventSub.close(); tab.eventSub = null; }
+      clearTimeout(tab.asyncTimeout);
+    }
     if (state.sessionID) {
       try { await MiniAPI.deleteSession(state.sessionID); } catch(e) {}
     }
@@ -132,6 +136,33 @@
     });
   }
 
+  // onTabEvent is called by each tab's SSE subscription when the server pushes
+  // a navigation event. It only acts when the tab has an async navigate in flight.
+  function onTabEvent(tab, evt) {
+    if (evt.type === 'ready' && tab.asyncLoading) {
+      clearTimeout(tab.asyncTimeout);
+      tab.asyncTimeout = null;
+      tab.asyncLoading = false;
+      if (evt.url) tab.url = evt.url;
+      if (tab === activeTab()) {
+        loadSnapshot(true).catch(function(e) {
+          setStatus('Error: ' + e.message, 'error');
+        });
+      } else {
+        renderTabBar();
+      }
+    } else if (evt.type === 'error' && tab.asyncLoading) {
+      clearTimeout(tab.asyncTimeout);
+      tab.asyncTimeout = null;
+      tab.asyncLoading = false;
+      setLoading(false);
+      if (tab === activeTab()) {
+        setStatus('Error: ' + (evt.message || 'navigation failed'), 'error');
+        pageContent.innerHTML = '<div style="padding:16px;color:#c00"><b>Error:</b> ' + escHtml(evt.message || 'navigation failed') + '</div>';
+      }
+    }
+  }
+
   async function openNewTab(url) {
     await ensureSession();
     const data = await MiniAPI.createTab(state.sessionID, url || '');
@@ -144,10 +175,19 @@
       snap: null,
       history: url ? [url] : [],
       historyIdx: url ? 0 : -1,
+      eventSub: null,     // SSE subscription
+      asyncLoading: false, // true while an async navigate is in flight
+      asyncTimeout: null,  // timer guard for stalled async navigations
     };
     state.tabs.push(tab);
     state.activeTabIdx = state.tabs.length - 1;
     renderTabBar();
+
+    // Subscribe to tab events (SSE). The closure captures tab by reference.
+    tab.eventSub = MiniAPI.subscribeTabEvents(
+      state.sessionID, tab.tabID,
+      function(evt) { onTabEvent(tab, evt); }
+    );
 
     if (url) {
       await loadSnapshot();
@@ -160,6 +200,8 @@
   async function closeTab(idx) {
     const tab = state.tabs[idx];
     if (!tab) return;
+    if (tab.eventSub) { tab.eventSub.close(); tab.eventSub = null; }
+    clearTimeout(tab.asyncTimeout);
     try { await MiniAPI.closeTab(state.sessionID, tab.tabID); } catch(e) {}
     state.tabs.splice(idx, 1);
     if (state.activeTabIdx >= state.tabs.length) {
@@ -206,14 +248,39 @@
     setStatus('Loading ' + url + '…', 'loading');
     addressBar.value = url;
 
+    let useAsync = false;
     try {
-      await MiniAPI.navigate(state.sessionID, tab.tabID, url);
-      await loadSnapshot(opts.pushHistory !== false);
+      if (tab.eventSub) {
+        // Async navigate: server returns 202 immediately; SSE event signals completion.
+        useAsync = true;
+        tab.asyncLoading = true;
+        tab.asyncTimeout = setTimeout(function() {
+          if (tab.asyncLoading) {
+            tab.asyncLoading = false;
+            setLoading(false);
+            setStatus('Navigation timed out', 'error');
+          }
+        }, 30000);
+        await MiniAPI.navigateAsync(state.sessionID, tab.tabID, url);
+        // Optimistically push history; SSE handler calls loadSnapshot on success.
+        if (opts.pushHistory !== false && url !== tab.history[tab.historyIdx]) {
+          tab.history = tab.history.slice(0, tab.historyIdx + 1);
+          tab.history.push(url);
+          tab.historyIdx = tab.history.length - 1;
+        }
+        updateNavButtons();
+        // Keep setLoading(true); SSE ready/error event will clear it.
+      } else {
+        // Sync fallback: block until navigation complete, then load snapshot.
+        await MiniAPI.navigate(state.sessionID, tab.tabID, url);
+        await loadSnapshot(opts.pushHistory !== false);
+      }
     } catch(e) {
+      if (useAsync) { clearTimeout(tab.asyncTimeout); tab.asyncLoading = false; }
       setStatus('Error: ' + e.message, 'error');
       pageContent.innerHTML = '<div style="padding:16px;color:#c00"><b>Error:</b> ' + escHtml(e.message) + '</div>';
     } finally {
-      setLoading(false);
+      if (!useAsync) setLoading(false);
     }
   }
 
@@ -267,6 +334,19 @@
   async function onInteract(event) {
     const tab = activeTab();
     if (!tab || !state.sessionID) return;
+
+    // For click events, bundle current input values so the server applies them
+    // before clicking — this avoids the race where the click arrives at Chromium
+    // before the user's typed values.
+    if (event.type === 'click' || event.type === 'tap') {
+      const formValues = [];
+      const inputs = pageContent.querySelectorAll('[data-element-id]');
+      for (const el of inputs) {
+        const eid = parseInt(el.dataset.elementId, 10);
+        if (eid) formValues.push({ element_id: eid, value: el.value || '' });
+      }
+      if (formValues.length > 0) event.form_values = formValues;
+    }
 
     setLoading(true);
     setStatus('Interacting…', 'loading');

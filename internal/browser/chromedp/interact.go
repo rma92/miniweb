@@ -50,11 +50,19 @@ func SetInputValue(ctx context.Context, elementID int, value string, snap *minid
 		y = node.Layout.Y + node.Layout.H/2
 	}
 
+	// Layout coordinates are in document space (include scroll offset).
+	// elementFromPoint requires viewport-relative coordinates.
 	js := fmt.Sprintf(`(function(){
-		var el = document.elementFromPoint(%f, %f);
-		if(el){el.value=%q; el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); return true;}
-		return false;
-	})()`, x-0 /* adjust for scroll */, y-0, value)
+		var vx = %f - (window.scrollX||0);
+		var vy = %f - (window.scrollY||0);
+		var el = document.elementFromPoint(vx, vy);
+		if(!el) return false;
+		el.focus();
+		el.value = %q;
+		el.dispatchEvent(new Event('input',{bubbles:true}));
+		el.dispatchEvent(new Event('change',{bubbles:true}));
+		return true;
+	})()`, x, y, value)
 
 	var ok bool
 	return chromedp.Run(ctx, chromedp.Evaluate(js, &ok))

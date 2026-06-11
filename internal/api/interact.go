@@ -18,11 +18,15 @@ type interactRequest struct {
 	SnapshotID       int    `json:"snapshot_id"`
 	RenderingProfile string `json:"rendering_profile"`
 	Event            struct {
-		Type      string `json:"type"`
-		ElementID int    `json:"element_id"`
-		Value     string `json:"value"`
-		ScrollX   int    `json:"scroll_x"`
-		ScrollY   int    `json:"scroll_y"`
+		Type       string `json:"type"`
+		ElementID  int    `json:"element_id"`
+		Value      string `json:"value"`
+		ScrollX    int    `json:"scroll_x"`
+		ScrollY    int    `json:"scroll_y"`
+		FormValues []struct {
+			ElementID int    `json:"element_id"`
+			Value     string `json:"value"`
+		} `json:"form_values"`
 	} `json:"event"`
 }
 
@@ -43,12 +47,18 @@ func (h *interactHandler) post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	formVals := make([]browser.FormValue, 0, len(req.Event.FormValues))
+	for _, fv := range req.Event.FormValues {
+		formVals = append(formVals, browser.FormValue{ElementID: fv.ElementID, Value: fv.Value})
+	}
+
 	event := browser.InteractionEvent{
-		Type:      req.Event.Type,
-		ElementID: req.Event.ElementID,
-		Value:     req.Event.Value,
-		ScrollX:   req.Event.ScrollX,
-		ScrollY:   req.Event.ScrollY,
+		Type:       req.Event.Type,
+		ElementID:  req.Event.ElementID,
+		Value:      req.Event.Value,
+		ScrollX:    req.Event.ScrollX,
+		ScrollY:    req.Event.ScrollY,
+		FormValues: formVals,
 	}
 
 	if err := h.mgr.Interact(sess, tabID, event); err != nil {

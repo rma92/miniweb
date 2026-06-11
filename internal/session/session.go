@@ -82,6 +82,13 @@ func (s *Session) touch() {
 	s.LastActive = time.Now()
 }
 
+// Touch is the exported variant of touch for use outside the session package
+// (e.g., SSE handlers that need to keep the session alive).
+func (s *Session) Touch() { s.touch() }
+
+// GetTab returns the tab with the given ID.
+func (s *Session) GetTab(tabID string) (*Tab, bool) { return s.getTab(tabID) }
+
 // Info returns a snapshot of session metadata for admin/status use.
 func (s *Session) Info() SessionInfo {
 	s.mu.RLock()
