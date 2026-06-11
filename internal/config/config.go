@@ -17,6 +17,14 @@ type Config struct {
 	Encoding EncodingConfig `yaml:"encoding"`
 	Images   ImageConfig    `yaml:"images"`
 	AdBlock  AdBlockConfig  `yaml:"adblock"`
+	Archive  ArchiveConfig  `yaml:"archive"`
+}
+
+type ArchiveConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	DBPath       string `yaml:"db_path"`
+	MaxPerUser   int    `yaml:"max_per_user"`
+	AdminToken   string `yaml:"admin_token"` // also used as the admin API token
 }
 
 type AdBlockConfig struct {
@@ -122,6 +130,11 @@ func defaults() *Config {
 		AdBlock: AdBlockConfig{
 			Enabled: false,
 		},
+		Archive: ArchiveConfig{
+			Enabled:    false,
+			DBPath:     "archives.db",
+			MaxPerUser: 100,
+		},
 	}
 }
 
@@ -210,6 +223,17 @@ func applyEnvOverrides(cfg *Config) {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.AdBlock.Enabled = b
 		}
+	}
+	if v := os.Getenv("ARCHIVE_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Archive.Enabled = b
+		}
+	}
+	if v := os.Getenv("ARCHIVE_DB"); v != "" {
+		cfg.Archive.DBPath = v
+	}
+	if v := os.Getenv("ADMIN_TOKEN"); v != "" {
+		cfg.Archive.AdminToken = v
 	}
 }
 

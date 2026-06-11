@@ -11,6 +11,7 @@ import (
 
 	"github.com/user/miniweb/internal/adblock"
 	"github.com/user/miniweb/internal/api"
+	"github.com/user/miniweb/internal/archive"
 	"github.com/user/miniweb/internal/auth"
 	cdpworker "github.com/user/miniweb/internal/browser/chromedp"
 	"github.com/user/miniweb/internal/config"
@@ -54,6 +55,18 @@ func main() {
 		}
 	}
 
+	// Archive store (optional — only opened if archive.enabled).
+	var archiveStore *archive.Store
+	if cfg.Archive.Enabled {
+		var archErr error
+		archiveStore, archErr = archive.Open(cfg.Archive.DBPath)
+		if archErr != nil {
+			log.Fatalf("open archive store: %v", archErr)
+		}
+		defer archiveStore.Close()
+		log.Printf("archive store opened: %s", cfg.Archive.DBPath)
+	}
+
 	// Session manager with background expiry.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -72,7 +85,7 @@ func main() {
 
 	// HTTP router.
 	webHandler := http.FileServer(http.Dir("web/"))
-	router := api.NewRouter(mgr, cfg, tokenStore, webHandler)
+	router := api.NewRouter(mgr, cfg, tokenStore, archiveStore, webHandler)
 
 	srv := &http.Server{
 		Addr:         cfg.Server.ListenAddr,

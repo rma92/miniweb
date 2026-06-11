@@ -15,6 +15,8 @@
   <button id="btn-reload" title="Reload">&#8635;</button>
   <input id="address-bar" type="url" placeholder="Enter URL…" spellcheck="false" autocomplete="off">
   <button id="btn-go">Go</button>
+  <button id="btn-archive" title="Save for offline reading">&#128278;</button>
+  <button id="btn-archives" title="Saved pages">&#128194;</button>
   <button id="btn-settings" title="Settings">&#9881;</button>
 </div>
 
@@ -30,6 +32,17 @@
     <div id="page-content"></div>
   </div>
   <div id="loading-overlay">Loading&hellip;</div>
+</div>
+
+<!-- Archives panel (hidden by default) -->
+<div id="archives-panel" class="hidden">
+  <div id="archives-header">
+    <span>Saved pages</span>
+    <button id="btn-archives-close">&times;</button>
+  </div>
+  <div id="archives-body">
+    <div id="archives-list"><em>Loading…</em></div>
+  </div>
 </div>
 
 <!-- Settings panel (hidden by default) -->

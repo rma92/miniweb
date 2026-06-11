@@ -183,6 +183,32 @@ window.MiniAPI = (function() {
     return `${base}/api/v1/sessions/${sessionID}/tabs/${tabID}/resources/${resourceID}`;
   }
 
+  function archivePage(sessionID, tabID) {
+    return request('POST', `/api/v1/sessions/${sessionID}/tabs/${tabID}/archive`, {});
+  }
+
+  function listArchives() {
+    return request('GET', '/api/v1/archives', undefined);
+  }
+
+  function deleteArchive(archiveID) {
+    return request('DELETE', `/api/v1/archives/${archiveID}`, undefined);
+  }
+
+  async function openArchive(archiveID) {
+    const base = Settings.apiBase();
+    const headers = Settings.authHeaders();
+    headers['Accept'] = 'application/minidom+json';
+    headers['Accept-Encoding'] = 'gzip, br';
+    const res = await fetch(`${base}/api/v1/archives/${archiveID}`, { headers });
+    if (!res.ok) {
+      let msg = res.statusText;
+      try { const j = await res.json(); msg = j.error || msg; } catch(e) {}
+      throw new Error(msg);
+    }
+    return res.json();
+  }
+
   return {
     createSession,
     deleteSession,
@@ -194,5 +220,9 @@ window.MiniAPI = (function() {
     getSnapshot,
     interact,
     getResource,
+    archivePage,
+    listArchives,
+    deleteArchive,
+    openArchive,
   };
 })();

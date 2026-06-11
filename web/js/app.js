@@ -28,6 +28,11 @@
   const btnSettingsSave  = document.getElementById('btn-settings-save');
   const btnClearSession  = document.getElementById('btn-clear-session');
   const settingsStatus   = document.getElementById('settings-status');
+  const btnArchive       = document.getElementById('btn-archive');
+  const btnArchives      = document.getElementById('btn-archives');
+  const archivesPanel    = document.getElementById('archives-panel');
+  const btnArchivesClose = document.getElementById('btn-archives-close');
+  const archivesList     = document.getElementById('archives-list');
 
   // --- Helpers ---
   function setStatus(msg, type) {
@@ -380,6 +385,95 @@
   btnClearSession.addEventListener('click', async () => {
     await clearSession();
     settingsPanel.classList.add('hidden');
+  });
+
+  // --- Archive ---
+  btnArchive && btnArchive.addEventListener('click', async () => {
+    const tab = activeTab();
+    if (!tab || !state.sessionID) {
+      setStatus('No active tab to archive.', 'error');
+      return;
+    }
+    setStatus('Saving page…', 'loading');
+    try {
+      const result = await MiniAPI.archivePage(state.sessionID, tab.tabID);
+      setStatus('Saved: ' + (result.title || result.url));
+    } catch(e) {
+      setStatus('Archive failed: ' + e.message, 'error');
+    }
+  });
+
+  async function openArchivesPanel() {
+    archivesPanel.classList.remove('hidden');
+    archivesList.innerHTML = '<em>Loading…</em>';
+    try {
+      const items = await MiniAPI.listArchives();
+      if (!items || items.length === 0) {
+        archivesList.innerHTML = '<p style="color:#888">No saved pages yet.</p>';
+        return;
+      }
+      archivesList.innerHTML = '';
+      items.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'archive-row';
+
+        const link = document.createElement('a');
+        link.className = 'archive-link';
+        link.href = '#';
+        link.textContent = item.title || item.url;
+        link.title = item.url;
+        link.onclick = async (e) => {
+          e.preventDefault();
+          archivesPanel.classList.add('hidden');
+          setLoading(true);
+          setStatus('Opening archive…', 'loading');
+          try {
+            const snap = await MiniAPI.openArchive(item.id);
+            // Render the archived snapshot in a synthetic tab view.
+            pageContent.innerHTML = '';
+            MiniRenderer.render(snap, pageContent, null, null);
+            addressBar.value = item.url;
+            document.title = (item.title || 'Archive') + ' — MiniNext [offline]';
+            setStatus((item.title || item.url) + ' [archived]');
+          } catch(err) {
+            setStatus('Open failed: ' + err.message, 'error');
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        const meta = document.createElement('span');
+        meta.className = 'archive-meta';
+        const kb = Math.round(item.size / 1024);
+        const d = new Date(item.created_at);
+        meta.textContent = `${kb} KB · ${d.toLocaleDateString()}`;
+
+        const del = document.createElement('button');
+        del.className = 'archive-delete';
+        del.textContent = '×';
+        del.title = 'Delete this archive';
+        del.onclick = async () => {
+          try {
+            await MiniAPI.deleteArchive(item.id);
+            row.remove();
+          } catch(e) {
+            setStatus('Delete failed: ' + e.message, 'error');
+          }
+        };
+
+        row.appendChild(link);
+        row.appendChild(meta);
+        row.appendChild(del);
+        archivesList.appendChild(row);
+      });
+    } catch(e) {
+      archivesList.innerHTML = '<p style="color:#c00">Error: ' + escHtml(e.message) + '</p>';
+    }
+  }
+
+  btnArchives && btnArchives.addEventListener('click', openArchivesPanel);
+  btnArchivesClose && btnArchivesClose.addEventListener('click', () => {
+    archivesPanel.classList.add('hidden');
   });
 
   // --- Init ---

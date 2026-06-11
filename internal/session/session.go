@@ -81,3 +81,46 @@ func (s *Session) touch() {
 	defer s.mu.Unlock()
 	s.LastActive = time.Now()
 }
+
+// Info returns a snapshot of session metadata for admin/status use.
+func (s *Session) Info() SessionInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	stateStr := "active"
+	if s.State == StateSleeping {
+		stateStr = "sleeping"
+	}
+
+	tabs := make([]TabInfo, 0, len(s.tabs))
+	for _, t := range s.tabs {
+		tabs = append(tabs, TabInfo{TabID: t.ID, CurrentURL: t.CurrentURL})
+	}
+
+	return SessionInfo{
+		SessionID:      s.ID,
+		UserID:         s.UserID,
+		State:          stateStr,
+		CreatedAt:      s.CreatedAt,
+		LastActive:     s.LastActive,
+		Tabs:           tabs,
+		AdBlockEnabled: s.AdBlockEnabled,
+	}
+}
+
+// SessionInfo is a serialisable snapshot of session metadata.
+type SessionInfo struct {
+	SessionID      string    `json:"session_id"`
+	UserID         string    `json:"user_id"`
+	State          string    `json:"state"`
+	CreatedAt      time.Time `json:"created_at"`
+	LastActive     time.Time `json:"last_active"`
+	Tabs           []TabInfo `json:"tabs"`
+	AdBlockEnabled bool      `json:"adblock_enabled"`
+}
+
+// TabInfo is a serialisable snapshot of tab metadata.
+type TabInfo struct {
+	TabID      string `json:"tab_id"`
+	CurrentURL string `json:"current_url"`
+}

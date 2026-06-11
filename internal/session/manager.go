@@ -149,6 +149,28 @@ func (m *Manager) Interact(sess *Session, tabID string, event browser.Interactio
 	return nil
 }
 
+// ListAllSessions returns all non-dead sessions for admin use.
+// Unlike GetSession, this bypasses user ownership checks.
+func (m *Manager) ListAllSessions() []*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		s.mu.RLock()
+		state := s.State
+		s.mu.RUnlock()
+		if state != StateDead {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// ForceDeleteSession destroys a session regardless of ownership (admin only).
+func (m *Manager) ForceDeleteSession(id string) error {
+	return m.DeleteSession(id, "") // empty userID skips ownership check
+}
+
 // GetLastSnap returns the last snapshot for a tab if its ID matches sinceID.
 // Used by the delta snapshot path to retrieve the base for diffing.
 func (m *Manager) GetLastSnap(sess *Session, tabID string, sinceID int) *minidom.PageSnapshot {

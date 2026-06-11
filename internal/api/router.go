@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/user/miniweb/internal/archive"
 	"github.com/user/miniweb/internal/auth"
 	"github.com/user/miniweb/internal/config"
 	"github.com/user/miniweb/internal/metrics"
@@ -13,7 +14,7 @@ import (
 
 // NewRouter builds and returns the chi router for the full REST API.
 // The webFS handler is used to serve the static HTML5 client.
-func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, webHandler http.Handler) http.Handler {
+func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, archiveStore *archive.Store, webHandler http.Handler) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -47,6 +48,25 @@ func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, 
 
 		resH := &resourcesHandler{mgr: mgr, cfg: cfg}
 		r.Get("/sessions/{sessionID}/tabs/{tabID}/resources/{resourceID}", resH.get)
+
+		// Archive routes (enabled unconditionally; Store may be nil if disabled).
+		if archiveStore != nil {
+			archH := &archiveHandler{store: archiveStore, mgr: mgr, cfg: cfg}
+			r.Post("/sessions/{sessionID}/tabs/{tabID}/archive", archH.create)
+			r.Get("/archives", archH.list)
+			r.Get("/archives/{archiveID}", archH.get)
+			r.Delete("/archives/{archiveID}", archH.delete)
+		}
+	})
+
+	// Admin API — protected by a separate admin token.
+	adminH := &adminHandler{mgr: mgr, cfg: cfg}
+	r.Route("/admin", func(r chi.Router) {
+		r.Use(adminAuthMiddleware(cfg.Archive.AdminToken))
+		r.Get("/sessions", adminH.sessions)
+		r.Delete("/sessions/{sessionID}", adminH.deleteSession)
+		r.Get("/config", adminH.configView)
+		r.Get("/status", adminH.status)
 	})
 
 	// Serve static web client for everything else.

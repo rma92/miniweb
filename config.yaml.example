@@ -44,3 +44,9 @@ adblock:
   # - "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt"
   filter_list_refresh_hours: 24   # how often to re-download filter lists
   filter_list_cache_dir: ".adblock_cache"  # local cache for downloaded lists
+
+archive:
+  enabled: false              # set true to enable offline reading / page archiving
+  db_path: "archives.db"     # bbolt database file for saved pages
+  max_per_user: 100           # max archives per user (0 = unlimited); oldest auto-deleted
+  # admin_token: "your-admin-token"  # token for /admin/* endpoints (separate from auth token)
