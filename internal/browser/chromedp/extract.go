@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/chromedp/chromedp"
+	"github.com/google/uuid"
 	"github.com/user/miniweb/internal/minidom"
 )
 
@@ -287,9 +289,53 @@ func extractCurrent(ctx context.Context) (*minidom.PageSnapshot, error) {
 		}
 	}
 
+	// Convert IMAGE node src attrs into ResourceRef entries so the client never
+	// fetches external URLs directly — all image requests go through /resources/.
+	var resources []minidom.ResourceRef
+	for i := range nodes {
+		if nodes[i].Type != minidom.NodeImage {
+			continue
+		}
+		src, ok := nodes[i].Attrs["src"]
+		if !ok || src == "" {
+			continue
+		}
+		// Inline data URIs don't need proxying; pass them through as-is.
+		if strings.HasPrefix(src, "data:") {
+			continue
+		}
+		// Only proxy http/https URLs.
+		if !strings.HasPrefix(src, "http://") && !strings.HasPrefix(src, "https://") {
+			continue
+		}
+
+		resID := "res_" + strings.ReplaceAll(uuid.New().String(), "-", "")
+		w, h := 0, 0
+		if nodes[i].Attrs["width"] != "" {
+			fmt.Sscanf(nodes[i].Attrs["width"], "%d", &w)
+		}
+		if nodes[i].Attrs["height"] != "" {
+			fmt.Sscanf(nodes[i].Attrs["height"], "%d", &h)
+		}
+		resources = append(resources, minidom.ResourceRef{
+			ResourceID: resID,
+			URL:        src,
+			Width:      w,
+			Height:     h,
+		})
+
+		// Replace src with the resource ID; remove the raw external URL.
+		nodes[i].ResourceID = resID
+		delete(nodes[i].Attrs, "src")
+		if len(nodes[i].Attrs) == 0 {
+			nodes[i].Attrs = nil
+		}
+	}
+
 	return &minidom.PageSnapshot{
-		URL:   result.URL,
-		Title: result.Title,
-		Nodes: nodes,
+		URL:       result.URL,
+		Title:     result.Title,
+		Nodes:     nodes,
+		Resources: resources,
 	}, nil
 }

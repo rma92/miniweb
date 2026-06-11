@@ -5,7 +5,10 @@
 
 window.MiniRenderer = (function() {
 
-  function render(snap, container, onInteract) {
+  // render(snap, container, onInteract, getResourceURL)
+  // getResourceURL(resourceID) → URL string routed through the server proxy.
+  // If omitted, images are rendered as broken (no external URLs ever used directly).
+  function render(snap, container, onInteract, getResourceURL) {
     container.innerHTML = '';
     if (!snap || !snap.nodes || snap.nodes.length === 0) {
       container.textContent = '(empty page)';
@@ -25,7 +28,7 @@ window.MiniRenderer = (function() {
 
     function buildNode(node) {
       if (!node) return null;
-      const el = createEl(node, onInteract);
+      const el = createEl(node, onInteract, getResourceURL);
       if (!el) return null;
 
       // Append children.
@@ -62,7 +65,7 @@ window.MiniRenderer = (function() {
     container.appendChild(wrapper);
   }
 
-  function createEl(node, onInteract) {
+  function createEl(node, onInteract, getResourceURL) {
     let el;
 
     switch (node.type) {
@@ -114,10 +117,18 @@ window.MiniRenderer = (function() {
       case 'IMAGE': {
         el = document.createElement('img');
         el.className = 'mn-image';
-        const src = node.attrs && node.attrs.src;
-        if (src) el.src = src;
         el.alt = node.text || '';
         el.loading = 'lazy';
+        if (node.resource_id && getResourceURL) {
+          // Route through server proxy — never fetch external URLs directly.
+          el.src = getResourceURL(node.resource_id);
+        } else if (node.attrs && node.attrs.src &&
+                   node.attrs.src.startsWith('data:')) {
+          // Inline data URIs are safe to use directly.
+          el.src = node.attrs.src;
+        }
+        // If neither condition is met the img remains broken — that's intentional:
+        // external URLs must always be proxied through the server.
         break;
       }
 

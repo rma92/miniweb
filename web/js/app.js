@@ -221,7 +221,11 @@
       pageContent.innerHTML = '';
       return;
     }
-    MiniRenderer.render(snap, pageContent, onInteract);
+    const tab = activeTab();
+    const getResourceURL = (tab && state.sessionID)
+      ? resID => MiniAPI.getResource(state.sessionID, tab.tabID, resID)
+      : null;
+    MiniRenderer.render(snap, pageContent, onInteract, getResourceURL);
   }
 
   // --- Interaction ---
