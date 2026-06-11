@@ -50,6 +50,10 @@ type BrowserWorker interface {
 	SleepSession(session SessionHandle) error
 	ResumeSession(session SessionHandle) error
 	DestroySession(session SessionHandle) error
+	// SetAdBlock enables or disables ad blocking for a session.
+	// The change takes effect immediately for any open tabs that have the CDP
+	// Fetch listener active, and for all future tabs in the session.
+	SetAdBlock(session SessionHandle, enabled bool) error
 }
 
 // DefaultProfiles provides the six built-in device profiles from the spec.

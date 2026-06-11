@@ -20,8 +20,11 @@ type Config struct {
 }
 
 type AdBlockConfig struct {
-	Enabled      bool     `yaml:"enabled"`
-	ExtraDomains []string `yaml:"extra_domains"`
+	Enabled             bool     `yaml:"enabled"`
+	ExtraDomains        []string `yaml:"extra_domains"`
+	FilterListURLs      []string `yaml:"filter_list_urls"`
+	FilterListRefreshH  int      `yaml:"filter_list_refresh_hours"`
+	FilterListCacheDir  string   `yaml:"filter_list_cache_dir"`
 }
 
 type ServerConfig struct {

@@ -17,10 +17,11 @@ type sessionsHandler struct {
 type createSessionRequest struct {
 	DeviceProfile string `json:"device_profile"`
 	Capabilities  struct {
-		PageFormats      []string `json:"page_formats"`
-		Compression      []string `json:"compression"`
-		ImageFormats     []string `json:"image_formats"`
+		PageFormats       []string `json:"page_formats"`
+		Compression       []string `json:"compression"`
+		ImageFormats      []string `json:"image_formats"`
 		RenderingProfiles []string `json:"rendering_profiles"`
+		AdBlock           *bool    `json:"adblock"` // nil = use server default
 	} `json:"capabilities"`
 }
 
@@ -60,6 +61,12 @@ func (h *sessionsHandler) create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// If the client explicitly specifies an adblock preference, apply it now.
+	// nil means "use server default" (already set by Worker.CreateSession).
+	if req.Capabilities.AdBlock != nil {
+		_ = h.mgr.SetAdBlock(sess, *req.Capabilities.AdBlock)
 	}
 
 	writeJSON(w, createSessionResponse{
@@ -106,4 +113,29 @@ func (h *sessionsHandler) resume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"status": "active"})
+}
+
+func (h *sessionsHandler) adblock(w http.ResponseWriter, r *http.Request) {
+	sessID := chi.URLParam(r, "sessionID")
+	userID := auth.UserIDFromContext(r.Context())
+
+	sess, err := h.mgr.GetSession(sessID, userID)
+	if err != nil {
+		writeError(w, err.Error(), statusForSessionErr(err))
+		return
+	}
+
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.mgr.SetAdBlock(sess, body.Enabled); err != nil {
+		writeError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]interface{}{"adblock_enabled": body.Enabled})
 }

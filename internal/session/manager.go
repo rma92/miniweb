@@ -209,6 +209,18 @@ func (m *Manager) ResumeSession(id, userID string) error {
 	return nil
 }
 
+// SetAdBlock enables or disables ad blocking for a session.
+func (m *Manager) SetAdBlock(sess *Session, enabled bool) error {
+	if err := m.worker.SetAdBlock(sess.Handle, enabled); err != nil {
+		return err
+	}
+	sess.mu.Lock()
+	sess.AdBlockEnabled = enabled
+	sess.mu.Unlock()
+	sess.touch()
+	return nil
+}
+
 // DeleteSession destroys a session and its browser resources.
 func (m *Manager) DeleteSession(id, userID string) error {
 	sess, err := m.GetSession(id, userID)

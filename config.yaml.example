@@ -34,7 +34,13 @@ images:
   max_height: 1200
 
 adblock:
-  enabled: false              # set true to block ads/trackers via CDP Fetch intercept
+  enabled: false              # set true to enable ad/tracker blocking via CDP Fetch intercept
   extra_domains: []           # additional domains to block beyond the built-in list
   # - "ads.example.com"
   # - "tracking.example.com"
+  filter_list_urls:           # EasyList / uBlock Origin / ABP format lists (optional)
+  # - "https://easylist.to/easylist/easylist.txt"
+  # - "https://easylist.to/easylist/easyprivacy.txt"
+  # - "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt"
+  filter_list_refresh_hours: 24   # how often to re-download filter lists
+  filter_list_cache_dir: ".adblock_cache"  # local cache for downloaded lists

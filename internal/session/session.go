@@ -18,13 +18,14 @@ const (
 
 // Session represents one remote browsing environment for a user.
 type Session struct {
-	ID         string
-	UserID     string
-	Handle     browser.SessionHandle
-	Profile    browser.DeviceProfile
-	State      State
-	CreatedAt  time.Time
-	LastActive time.Time
+	ID              string
+	UserID          string
+	Handle          browser.SessionHandle
+	Profile         browser.DeviceProfile
+	State           State
+	AdBlockEnabled  bool // per-session ad blocking toggle
+	CreatedAt       time.Time
+	LastActive      time.Time
 
 	mu   sync.RWMutex
 	tabs map[string]*Tab // tab ID → Tab
@@ -33,14 +34,15 @@ type Session struct {
 func newSession(id, userID string, handle browser.SessionHandle, profile browser.DeviceProfile) *Session {
 	now := time.Now()
 	return &Session{
-		ID:         id,
-		UserID:     userID,
-		Handle:     handle,
-		Profile:    profile,
-		State:      StateActive,
-		CreatedAt:  now,
-		LastActive: now,
-		tabs:       make(map[string]*Tab),
+		ID:             id,
+		UserID:         userID,
+		Handle:         handle,
+		Profile:        profile,
+		State:          StateActive,
+		AdBlockEnabled: true, // on by default; worker's SetAdBlock call controls actual CDP state
+		CreatedAt:      now,
+		LastActive:     now,
+		tabs:           make(map[string]*Tab),
 	}
 }
 

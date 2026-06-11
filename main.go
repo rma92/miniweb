@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/user/miniweb/internal/adblock"
 	"github.com/user/miniweb/internal/api"
 	"github.com/user/miniweb/internal/auth"
 	cdpworker "github.com/user/miniweb/internal/browser/chromedp"
@@ -57,6 +58,17 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mgr := session.NewManager(ctx, worker, cfg)
+
+	// Start filter list refresh loop (runs after ctx is available).
+	if cfg.AdBlock.Enabled && len(cfg.AdBlock.FilterListURLs) > 0 {
+		if m := worker.AdMatcher(); m != nil {
+			adblock.StartRefreshLoop(ctx, adblock.FilterListConfig{
+				URLs:         cfg.AdBlock.FilterListURLs,
+				RefreshHours: cfg.AdBlock.FilterListRefreshH,
+				CacheDir:     cfg.AdBlock.FilterListCacheDir,
+			}, m)
+		}
+	}
 
 	// HTTP router.
 	webHandler := http.FileServer(http.Dir("web/"))

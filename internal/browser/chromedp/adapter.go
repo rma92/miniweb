@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 
 	"github.com/chromedp/chromedp"
 	"github.com/user/miniweb/internal/adblock"
@@ -26,8 +27,10 @@ type cdpSession struct {
 	handle   browser.SessionHandle
 	profile  browser.DeviceProfile
 	sleeping bool
+	// adBlockEnabled is shared across all tabs in the session. Using an atomic
+	// so the CDP event listener goroutines can read it lock-free.
+	adBlockEnabled atomic.Bool
 
-	// Each tab gets its own chromedp context derived from the session allocator.
 	mu       sync.RWMutex
 	tabs     map[browser.TabHandle]*cdpTab
 	lastSnap map[browser.TabHandle]*minidom.PageSnapshot
@@ -79,6 +82,11 @@ func (w *Worker) Close() {
 	w.allocCancel()
 }
 
+// AdMatcher returns the Matcher used for ad blocking, or nil if disabled.
+func (w *Worker) AdMatcher() *adblock.Matcher {
+	return w.adMatcher
+}
+
 // CreateSession creates a new isolated browser context.
 func (w *Worker) CreateSession(profile browser.DeviceProfile) (browser.SessionHandle, error) {
 	handle := browser.SessionHandle(newID("sess"))
@@ -90,6 +98,8 @@ func (w *Worker) CreateSession(profile browser.DeviceProfile) (browser.SessionHa
 		lastSnap: make(map[browser.TabHandle]*minidom.PageSnapshot),
 		savedURL: make(map[browser.TabHandle]string),
 	}
+	// Default adblock state: on when the server has a matcher configured.
+	sess.adBlockEnabled.Store(w.adMatcher != nil)
 
 	w.mu.Lock()
 	w.sessions[handle] = sess
@@ -123,9 +133,11 @@ func (w *Worker) OpenTab(session browser.SessionHandle, url string) (browser.Tab
 	sess.savedURL[tabHandle] = url
 	sess.mu.Unlock()
 
-	// Enable ad blocking on the new tab if configured.
+	// Enable ad blocking on the new tab. The session's adBlockEnabled atomic is
+	// shared: flipping it (via SetAdBlock) takes effect immediately for all open
+	// tabs in the session.
 	if w.adMatcher != nil {
-		if err := enableAdBlocking(tabCtx, w.adMatcher); err != nil {
+		if err := enableAdBlocking(tabCtx, w.adMatcher, &sess.adBlockEnabled); err != nil {
 			log.Printf("adblock setup for tab %s: %v", tabHandle, err)
 		}
 	}
@@ -313,6 +325,20 @@ func (w *Worker) DestroySession(session browser.SessionHandle) error {
 		tab.cancel()
 	}
 	sess.mu.Unlock()
+	return nil
+}
+
+// SetAdBlock enables or disables ad blocking for all tabs in the session.
+// The change is immediately visible to any open tab's CDP event listener.
+func (w *Worker) SetAdBlock(session browser.SessionHandle, enabled bool) error {
+	if w.adMatcher == nil {
+		return nil // server-side ad blocking not configured; no-op
+	}
+	sess, err := w.getSession(session)
+	if err != nil {
+		return err
+	}
+	sess.adBlockEnabled.Store(enabled)
 	return nil
 }
 

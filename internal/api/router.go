@@ -28,6 +28,7 @@ func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, 
 		r.Delete("/sessions/{sessionID}", sh.delete)
 		r.Post("/sessions/{sessionID}/sleep", sh.sleep)
 		r.Post("/sessions/{sessionID}/resume", sh.resume)
+		r.Post("/sessions/{sessionID}/adblock", sh.adblock)
 
 		th := &tabsHandler{mgr: mgr}
 		r.Post("/sessions/{sessionID}/tabs", th.create)

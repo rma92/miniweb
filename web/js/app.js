@@ -359,6 +359,23 @@
   btnSettings.addEventListener('click', openSettings);
   btnSettingsClose.addEventListener('click', () => settingsPanel.classList.add('hidden'));
   btnSettingsSave.addEventListener('click', saveSettings);
+
+  // Ad block toggle: applies immediately to the live session (no save needed).
+  document.getElementById('set-adblock').addEventListener('change', async (e) => {
+    const enabled = e.target.checked;
+    const s = Settings.get();
+    s.adBlockEnabled = enabled;
+    Settings.save(s);
+    if (state.sessionID) {
+      try {
+        await MiniAPI.setAdBlock(state.sessionID, enabled);
+        setStatus('Ad blocking ' + (enabled ? 'enabled' : 'disabled'));
+      } catch(err) {
+        setStatus('Ad block toggle failed: ' + err.message, 'error');
+      }
+    }
+  });
+
   btnClearSession.addEventListener('click', async () => {
     await clearSession();
     settingsPanel.classList.add('hidden');

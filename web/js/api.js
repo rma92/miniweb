@@ -40,7 +40,7 @@ window.MiniAPI = (function() {
         compression: ['gzip', 'brotli', 'zstd'],
         image_formats: ['jpeg', 'webp', 'png', 'gif'],
         rendering_profiles: ['box', 'flow'],
-        adblock: !!s.adBlockEnabled,
+        adblock: s.adBlockEnabled !== false, // default true
       }
     });
   }
@@ -55,6 +55,10 @@ window.MiniAPI = (function() {
 
   function resumeSession(sessionID) {
     return request('POST', `/api/v1/sessions/${sessionID}/resume`, {});
+  }
+
+  function setAdBlock(sessionID, enabled) {
+    return request('POST', `/api/v1/sessions/${sessionID}/adblock`, { enabled });
   }
 
   function createTab(sessionID, url) {
@@ -121,6 +125,7 @@ window.MiniAPI = (function() {
     deleteSession,
     sleepSession,
     resumeSession,
+    setAdBlock,
     createTab,
     navigate,
     getSnapshot,
