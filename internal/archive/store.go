@@ -83,42 +83,14 @@ func (s *Store) Save(meta Meta, data []byte, maxPerUser int) error {
 	})
 }
 
-// List returns all archive metadata for a user, newest first.
+// List returns all archive metadata for a user, newest first (by CreatedAt).
 func (s *Store) List(userID string) ([]Meta, error) {
-	var ids []string
-	prefix := []byte(userID + "\x00")
-	if err := s.db.View(func(tx *bolt.Tx) error {
-		c := tx.Bucket(bucketUser).Cursor()
-		for k, v := c.Seek(prefix); k != nil && strings.HasPrefix(string(k), string(prefix)); k, v = c.Next() {
-			ids = append(ids, string(v))
-		}
-		return nil
-	}); err != nil {
+	metas, err := s.metasForUser(userID)
+	if err != nil {
 		return nil, err
 	}
-
-	metas := make([]Meta, 0, len(ids))
-	if err := s.db.View(func(tx *bolt.Tx) error {
-		bkt := tx.Bucket(bucketMeta)
-		for _, id := range ids {
-			raw := bkt.Get([]byte(id))
-			if raw == nil {
-				continue
-			}
-			var m Meta
-			if err := json.Unmarshal(raw, &m); err == nil {
-				metas = append(metas, m)
-			}
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-
 	// Sort newest first.
-	for i, j := 0, len(metas)-1; i < j; i, j = i+1, j-1 {
-		metas[i], metas[j] = metas[j], metas[i]
-	}
+	sortMetasByTime(metas, false)
 	return metas, nil
 }
 
@@ -140,7 +112,12 @@ func (s *Store) Get(id, userID string) (*Meta, []byte, error) {
 			return ErrForbidden
 		}
 		meta = &m
-		data = tx.Bucket(bucketData).Get([]byte(id))
+		// Copy data out of bbolt page before the transaction closes.
+		src := tx.Bucket(bucketData).Get([]byte(id))
+		if src != nil {
+			data = make([]byte, len(src))
+			copy(data, src)
+		}
 		return nil
 	}); err != nil {
 		return nil, nil, err
@@ -186,10 +163,10 @@ func (s *Store) CountForUser(userID string) int {
 	return count
 }
 
-// enforceLimit deletes the oldest archives until count <= max.
-func (s *Store) enforceLimit(userID string, max int) error {
-	prefix := []byte(userID + "\x00")
+// metasForUser fetches all metadata entries for a user in arbitrary order.
+func (s *Store) metasForUser(userID string) ([]Meta, error) {
 	var ids []string
+	prefix := []byte(userID + "\x00")
 	if err := s.db.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(bucketUser).Cursor()
 		for k, v := c.Seek(prefix); k != nil && strings.HasPrefix(string(k), string(prefix)); k, v = c.Next() {
@@ -197,22 +174,66 @@ func (s *Store) enforceLimit(userID string, max int) error {
 		}
 		return nil
 	}); err != nil {
-		return err
+		return nil, err
 	}
 
-	for len(ids) > max {
-		// ids are in insertion order (oldest first when iterating bbolt by key).
-		oldest := ids[0]
-		ids = ids[1:]
+	metas := make([]Meta, 0, len(ids))
+	if err := s.db.View(func(tx *bolt.Tx) error {
+		bkt := tx.Bucket(bucketMeta)
+		for _, id := range ids {
+			raw := bkt.Get([]byte(id))
+			if raw == nil {
+				continue
+			}
+			var m Meta
+			if err := json.Unmarshal(raw, &m); err == nil {
+				metas = append(metas, m)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return metas, nil
+}
+
+// enforceLimit deletes the oldest archives by CreatedAt until count <= max.
+func (s *Store) enforceLimit(userID string, max int) error {
+	metas, err := s.metasForUser(userID)
+	if err != nil {
+		return err
+	}
+	if len(metas) <= max {
+		return nil
+	}
+	// Sort oldest first, delete the excess.
+	sortMetasByTime(metas, true)
+	for i := 0; len(metas)-i > max; i++ {
+		oldest := metas[i]
 		if err := s.db.Update(func(tx *bolt.Tx) error {
-			tx.Bucket(bucketMeta).Delete([]byte(oldest))
-			tx.Bucket(bucketData).Delete([]byte(oldest))
-			return tx.Bucket(bucketUser).Delete(userIndexKey(userID, oldest))
+			tx.Bucket(bucketMeta).Delete([]byte(oldest.ID))
+			tx.Bucket(bucketData).Delete([]byte(oldest.ID))
+			return tx.Bucket(bucketUser).Delete(userIndexKey(userID, oldest.ID))
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// sortMetasByTime sorts metas in-place. ascending=true → oldest first.
+// Uses a simple insertion sort (N is small, ≤ max_per_user).
+func sortMetasByTime(metas []Meta, ascending bool) {
+	for i := 1; i < len(metas); i++ {
+		for j := i; j > 0; j-- {
+			a, b := metas[j-1].CreatedAt, metas[j].CreatedAt
+			swap := ascending && a.After(b) || !ascending && b.After(a)
+			if !swap {
+				break
+			}
+			metas[j-1], metas[j] = metas[j], metas[j-1]
+		}
+	}
 }
 
 func userIndexKey(userID, archiveID string) []byte {

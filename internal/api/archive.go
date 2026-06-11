@@ -2,8 +2,10 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -13,6 +15,8 @@ import (
 	"github.com/user/miniweb/internal/browser"
 	"github.com/user/miniweb/internal/compress"
 	"github.com/user/miniweb/internal/config"
+	imgpkg "github.com/user/miniweb/internal/image"
+	"github.com/user/miniweb/internal/minidom"
 	"github.com/user/miniweb/internal/minidom/mbpf"
 	"github.com/user/miniweb/internal/minidom/text"
 	"github.com/user/miniweb/internal/session"
@@ -49,6 +53,9 @@ func (h *archiveHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err.Error(), statusForSessionErr(err))
 		return
 	}
+
+	// Fetch images inline so the archive is self-contained for offline use.
+	inlineImages(snap, h.cfg)
 
 	// Encode to MBPF and compress with brotli for compact storage.
 	payload, err := mbpf.Encode(snap)
@@ -185,9 +192,59 @@ func (h *archiveHandler) get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 	w.Header().Set("Content-Type", contentType)
-	_ = meta
+	if meta.FaviconURL != "" {
+		w.Header().Set("X-Favicon-URL", meta.FaviconURL)
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write(payload)
+}
+
+// inlineImages fetches all ResourceRef images concurrently and stores them as
+// InlineData so the archived snapshot is fully self-contained for offline use.
+// Images that fail to fetch or exceed 2 MB are silently skipped.
+func inlineImages(snap *minidom.PageSnapshot, cfg *config.Config) {
+	if len(snap.Resources) == 0 {
+		return
+	}
+
+	policy := imgpkg.FromSettings(
+		cfg.Images.DefaultFormat,
+		cfg.Images.DefaultQuality,
+		cfg.Images.MaxWidth,
+		cfg.Images.MaxHeight,
+	)
+
+	const maxConcurrent = 5
+	sem := make(chan struct{}, maxConcurrent)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for i := range snap.Resources {
+		res := &snap.Resources[i]
+		if res.URL == "" || len(res.InlineData) > 0 {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(r *minidom.ResourceRef) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			data, mime, err := imgpkg.Recompress(r.URL, policy)
+			if err != nil {
+				log.Printf("archive: skip image %s: %v", r.URL, err)
+				return
+			}
+			if len(data) > 2<<20 { // skip > 2 MB
+				return
+			}
+			mu.Lock()
+			r.InlineData = data
+			r.MIMEType = mime
+			mu.Unlock()
+		}(res)
+	}
+	wg.Wait()
 }
 
 // delete removes an archive entry.

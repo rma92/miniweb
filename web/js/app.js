@@ -145,7 +145,7 @@
   async function closeTab(idx) {
     const tab = state.tabs[idx];
     if (!tab) return;
-    try { await MiniAPI.deleteSession(state.sessionID); } catch(e) {}
+    try { await MiniAPI.closeTab(state.sessionID, tab.tabID); } catch(e) {}
     state.tabs.splice(idx, 1);
     if (state.activeTabIdx >= state.tabs.length) {
       state.activeTabIdx = state.tabs.length - 1;
@@ -388,6 +388,12 @@
   });
 
   // --- Archive ---
+  function swMessage(msg) {
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage(msg);
+    }
+  }
+
   btnArchive && btnArchive.addEventListener('click', async () => {
     const tab = activeTab();
     if (!tab || !state.sessionID) {
@@ -398,6 +404,8 @@
     try {
       const result = await MiniAPI.archivePage(state.sessionID, tab.tabID);
       setStatus('Saved: ' + (result.title || result.url));
+      // Tell the service worker to pre-warm the SW cache for offline access.
+      swMessage({ type: 'CACHE_ARCHIVE', archiveID: result.archive_id });
     } catch(e) {
       setStatus('Archive failed: ' + e.message, 'error');
     }
@@ -429,9 +437,20 @@
           setStatus('Opening archive…', 'loading');
           try {
             const snap = await MiniAPI.openArchive(item.id);
-            // Render the archived snapshot in a synthetic tab view.
+            // Build resource URL function: use inline data if present (for offline use),
+            // otherwise fall back to the live resource proxy (requires network).
+            const inlineMap = {};
+            for (const res of (snap.resources || [])) {
+              if (res.inline_data && res.resource_id) {
+                // JSON encodes []byte as base64 string.
+                inlineMap[res.resource_id] =
+                  `data:${res.mime_type || 'image/jpeg'};base64,${res.inline_data}`;
+              }
+            }
+            const getArchiveResource = (resID) => inlineMap[resID] || null;
+            // Render the archived snapshot.
             pageContent.innerHTML = '';
-            MiniRenderer.render(snap, pageContent, null, null);
+            MiniRenderer.render(snap, pageContent, null, getArchiveResource);
             addressBar.value = item.url;
             document.title = (item.title || 'Archive') + ' — MiniNext [offline]';
             setStatus((item.title || item.url) + ' [archived]');
@@ -455,6 +474,7 @@
         del.onclick = async () => {
           try {
             await MiniAPI.deleteArchive(item.id);
+            swMessage({ type: 'EVICT_ARCHIVE', archiveID: item.id });
             row.remove();
           } catch(e) {
             setStatus('Delete failed: ' + e.message, 'error');

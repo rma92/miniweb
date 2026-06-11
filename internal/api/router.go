@@ -38,6 +38,7 @@ func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, 
 
 		th := &tabsHandler{mgr: mgr}
 		r.Post("/sessions/{sessionID}/tabs", th.create)
+		r.Delete("/sessions/{sessionID}/tabs/{tabID}", th.close)
 		r.Post("/sessions/{sessionID}/tabs/{tabID}/navigate", th.navigate)
 
 		snapH := &snapshotHandler{mgr: mgr, cfg: cfg}

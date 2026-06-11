@@ -37,6 +37,24 @@ func (h *tabsHandler) create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"tab_id": tab.ID})
 }
 
+func (h *tabsHandler) close(w http.ResponseWriter, r *http.Request) {
+	sessID := chi.URLParam(r, "sessionID")
+	tabID := chi.URLParam(r, "tabID")
+	userID := auth.UserIDFromContext(r.Context())
+
+	sess, err := h.mgr.GetSession(sessID, userID)
+	if err != nil {
+		writeError(w, err.Error(), statusForSessionErr(err))
+		return
+	}
+
+	if err := h.mgr.CloseTab(sess, tabID); err != nil {
+		writeError(w, err.Error(), statusForSessionErr(err))
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *tabsHandler) navigate(w http.ResponseWriter, r *http.Request) {
 	sessID := chi.URLParam(r, "sessionID")
 	tabID := chi.URLParam(r, "tabID")

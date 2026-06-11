@@ -65,6 +65,10 @@ window.MiniAPI = (function() {
     return request('POST', `/api/v1/sessions/${sessionID}/tabs`, { url });
   }
 
+  function closeTab(sessionID, tabID) {
+    return request('DELETE', `/api/v1/sessions/${sessionID}/tabs/${tabID}`, undefined);
+  }
+
   function navigate(sessionID, tabID, url) {
     return request('POST', `/api/v1/sessions/${sessionID}/tabs/${tabID}/navigate`, { url });
   }
@@ -216,6 +220,7 @@ window.MiniAPI = (function() {
     resumeSession,
     setAdBlock,
     createTab,
+    closeTab,
     navigate,
     getSnapshot,
     interact,
