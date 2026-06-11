@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/user/miniweb/internal/archive"
 	"github.com/user/miniweb/internal/auth"
+	"github.com/user/miniweb/internal/browser"
 	"github.com/user/miniweb/internal/config"
 	"github.com/user/miniweb/internal/metrics"
 	"github.com/user/miniweb/internal/session"
@@ -14,7 +15,7 @@ import (
 
 // NewRouter builds and returns the chi router for the full REST API.
 // The webFS handler is used to serve the static HTML5 client.
-func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, archiveStore *archive.Store, webHandler http.Handler) http.Handler {
+func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, archiveStore *archive.Store, pool *browser.Pool, webHandler http.Handler) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -67,7 +68,7 @@ func NewRouter(mgr *session.Manager, cfg *config.Config, tokenStore auth.Store, 
 	})
 
 	// Admin API — protected by a separate admin token.
-	adminH := &adminHandler{mgr: mgr, cfg: cfg}
+	adminH := &adminHandler{mgr: mgr, cfg: cfg, pool: pool}
 	r.Route("/admin", func(r chi.Router) {
 		r.Use(adminAuthMiddleware(cfg.Archive.AdminToken))
 		r.Get("/sessions", adminH.sessions)

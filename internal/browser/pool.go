@@ -1,9 +1,12 @@
 package browser
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/user/miniweb/internal/minidom"
 )
@@ -14,10 +17,12 @@ import (
 type Pool struct {
 	mu         sync.RWMutex
 	workers    []PoolWorker
-	sessMap    map[SessionHandle]int        // session → worker index
-	tabMap     map[TabHandle]int            // tab → worker index
+	sessMap    map[SessionHandle]int         // session → worker index
+	tabMap     map[TabHandle]int             // tab → worker index
 	sessTabs   map[SessionHandle][]TabHandle // session → owned tabs (for cleanup)
-	counts     []atomic.Int64               // active session count per worker
+	counts     []atomic.Int64                // active session count per worker
+	factory    WorkerFactory                 // nil = no replacement on crash
+	unhealthy  []atomic.Bool                 // true if worker[i] has failed health check
 }
 
 // PoolWorker extends BrowserWorker with lifecycle methods needed by the pool.
@@ -26,19 +31,128 @@ type PoolWorker interface {
 	Close()
 }
 
+// HealthCheckable is an optional interface a PoolWorker can implement.
+// The pool calls Healthy() during health checks to detect crashed processes.
+type HealthCheckable interface {
+	Healthy() bool
+}
+
+// WorkerFactory creates a fresh PoolWorker of the same type (for replacement after crash).
+type WorkerFactory func() (PoolWorker, error)
+
 // NewPool wraps a pre-created slice of workers in a pool.
 func NewPool(workers []PoolWorker) (*Pool, error) {
+	return NewPoolWithFactory(workers, nil)
+}
+
+// NewPoolWithFactory creates a pool that can replace crashed workers using factory.
+func NewPoolWithFactory(workers []PoolWorker, factory WorkerFactory) (*Pool, error) {
 	if len(workers) == 0 {
 		return nil, fmt.Errorf("pool requires at least one worker")
 	}
 	p := &Pool{
-		workers:  workers,
-		sessMap:  make(map[SessionHandle]int),
-		tabMap:   make(map[TabHandle]int),
-		sessTabs: make(map[SessionHandle][]TabHandle),
-		counts:   make([]atomic.Int64, len(workers)),
+		workers:   workers,
+		sessMap:   make(map[SessionHandle]int),
+		tabMap:    make(map[TabHandle]int),
+		sessTabs:  make(map[SessionHandle][]TabHandle),
+		counts:    make([]atomic.Int64, len(workers)),
+		unhealthy: make([]atomic.Bool, len(workers)),
+		factory:   factory,
 	}
 	return p, nil
+}
+
+// StartHealthMonitor starts a background goroutine that checks all workers every
+// interval. Unhealthy workers (if factory is set) are replaced with fresh ones;
+// sessions on failed workers are evicted so clients receive errors and reconnect.
+func (p *Pool) StartHealthMonitor(ctx context.Context, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				p.checkAllWorkers()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+func (p *Pool) checkAllWorkers() {
+	for i, w := range p.workers {
+		hc, ok := w.(HealthCheckable)
+		if !ok {
+			continue
+		}
+		if hc.Healthy() {
+			p.unhealthy[i].Store(false)
+			continue
+		}
+		// Worker is unhealthy.
+		if p.unhealthy[i].Swap(true) {
+			continue // already marked; replacement may already be in progress
+		}
+		log.Printf("pool: worker %d failed health check", i)
+
+		if p.factory == nil {
+			log.Printf("pool: worker %d unhealthy (no factory configured for replacement)", i)
+			continue
+		}
+
+		// Create replacement worker.
+		newW, err := p.factory()
+		if err != nil {
+			log.Printf("pool: failed to create replacement for worker %d: %v", i, err)
+			continue
+		}
+
+		// Evict all sessions on the failed worker — clients will get errors
+		// and need to create new sessions.
+		p.mu.Lock()
+		old := p.workers[i]
+		p.workers[i] = newW
+		var evicted []SessionHandle
+		for sess, idx := range p.sessMap {
+			if idx == i {
+				evicted = append(evicted, sess)
+			}
+		}
+		for _, sess := range evicted {
+			for _, tab := range p.sessTabs[sess] {
+				delete(p.tabMap, tab)
+			}
+			delete(p.sessTabs, sess)
+			delete(p.sessMap, sess)
+		}
+		p.counts[i].Store(0)
+		p.mu.Unlock()
+
+		p.unhealthy[i].Store(false)
+		old.Close()
+		log.Printf("pool: worker %d replaced (%d sessions evicted)", i, len(evicted))
+	}
+}
+
+// WorkerStats returns per-worker session counts and health state for admin use.
+func (p *Pool) WorkerStats() []WorkerStat {
+	stats := make([]WorkerStat, len(p.workers))
+	for i := range p.workers {
+		stats[i] = WorkerStat{
+			Index:     i,
+			Sessions:  int(p.counts[i].Load()),
+			Unhealthy: p.unhealthy[i].Load(),
+		}
+	}
+	return stats
+}
+
+// WorkerStat holds the health and load state of one pool worker.
+type WorkerStat struct {
+	Index     int  `json:"index"`
+	Sessions  int  `json:"sessions"`
+	Unhealthy bool `json:"unhealthy"`
 }
 
 // Close shuts down all workers.
@@ -172,10 +286,27 @@ func (p *Pool) SetAdBlock(session SessionHandle, enabled bool) error {
 	return w.SetAdBlock(session, enabled)
 }
 
-// leastLoaded returns the index of the worker with the fewest active sessions.
+// leastLoaded returns the index of the healthiest, least-loaded worker.
+// Prefers healthy workers; falls back to unhealthy ones if all are unhealthy.
 func (p *Pool) leastLoaded() int {
-	best := 0
-	bestCount := p.counts[0].Load()
+	best := -1
+	bestCount := int64(1<<62)
+	// First pass: healthy workers only.
+	for i := range p.counts {
+		if p.unhealthy[i].Load() {
+			continue
+		}
+		if c := p.counts[i].Load(); best < 0 || c < bestCount {
+			bestCount = c
+			best = i
+		}
+	}
+	if best >= 0 {
+		return best
+	}
+	// All workers are unhealthy — pick least-loaded anyway.
+	best = 0
+	bestCount = p.counts[0].Load()
 	for i := 1; i < len(p.counts); i++ {
 		if c := p.counts[i].Load(); c < bestCount {
 			bestCount = c

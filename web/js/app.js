@@ -239,6 +239,8 @@
       pageContent.innerHTML = '';
       return;
     }
+    // Clear find highlights before re-rendering (marks become stale after DOM replacement).
+    clearFinds();
     const tab = activeTab();
     const getResourceURL = (tab && state.sessionID)
       ? resID => MiniAPI.getResource(state.sessionID, tab.tabID, resID)
@@ -494,6 +496,171 @@
   btnArchives && btnArchives.addEventListener('click', openArchivesPanel);
   btnArchivesClose && btnArchivesClose.addEventListener('click', () => {
     archivesPanel.classList.add('hidden');
+  });
+
+  // --- Find in page ---
+  const findBar    = document.getElementById('find-bar');
+  const findInput  = document.getElementById('find-input');
+  const findCount  = document.getElementById('find-count');
+  const findPrev   = document.getElementById('find-prev');
+  const findNext   = document.getElementById('find-next');
+  const findClose  = document.getElementById('find-close');
+
+  let findMatches = [];  // array of {node: TextNode, start: int, end: int} ranges
+  let findCurrent = -1;  // index into findMatches
+  let findMarks   = [];  // <mark> elements currently in the DOM
+
+  function openFind() {
+    findBar.classList.remove('hidden');
+    findInput.focus();
+    findInput.select();
+    if (findInput.value) runFind(findInput.value);
+  }
+
+  function closeFind() {
+    findBar.classList.add('hidden');
+    clearFinds();
+    findInput.classList.remove('no-match');
+  }
+
+  function clearFinds() {
+    // Unwrap all <mark> elements, restoring original text nodes.
+    for (const mark of findMarks) {
+      const parent = mark.parentNode;
+      if (!parent) continue;
+      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+      parent.removeChild(mark);
+      parent.normalize();
+    }
+    findMarks = [];
+    findMatches = [];
+    findCurrent = -1;
+    findCount.textContent = '';
+  }
+
+  function runFind(query) {
+    clearFinds();
+    if (!query) return;
+
+    const q = query.toLowerCase();
+    const walker = document.createTreeWalker(
+      pageContent,
+      NodeFilter.SHOW_TEXT,
+      { acceptNode: n => n.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT }
+    );
+
+    const ranges = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      const text = node.textContent.toLowerCase();
+      let pos = 0;
+      while ((pos = text.indexOf(q, pos)) !== -1) {
+        ranges.push({ node, start: pos, end: pos + q.length });
+        pos += q.length;
+      }
+    }
+
+    if (ranges.length === 0) {
+      findCount.textContent = '0 matches';
+      findInput.classList.add('no-match');
+      return;
+    }
+
+    findInput.classList.remove('no-match');
+
+    // Wrap matches in <mark> elements (process in reverse within each text node
+    // to preserve offsets).
+    // Group by text node.
+    const byNode = new Map();
+    for (const r of ranges) {
+      if (!byNode.has(r.node)) byNode.set(r.node, []);
+      byNode.get(r.node).push(r);
+    }
+
+    for (const [textNode, nodeRanges] of byNode) {
+      // Process ranges in reverse so splitting doesn't affect earlier offsets.
+      nodeRanges.sort((a, b) => b.start - a.start);
+      let current = textNode;
+      for (const r of nodeRanges) {
+        const after  = current.splitText(r.end);
+        const mid    = current.splitText(r.start);
+        const mark   = document.createElement('mark');
+        mark.className = 'find-highlight';
+        mid.parentNode.insertBefore(mark, after);
+        mark.appendChild(mid);
+        findMarks.push(mark);
+        current = after;
+      }
+    }
+
+    // findMarks is in reverse-per-node order; sort by DOM position.
+    findMarks.sort((a, b) => {
+      const pos = a.compareDocumentPosition(b);
+      return pos & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+    });
+
+    findMatches = findMarks;
+    findCurrent = 0;
+    scrollToMatch(0);
+    updateFindCount();
+  }
+
+  function scrollToMatch(idx) {
+    for (const m of findMarks) m.classList.remove('find-current');
+    if (idx < 0 || idx >= findMarks.length) return;
+    findMarks[idx].classList.add('find-current');
+    findMarks[idx].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
+  function updateFindCount() {
+    if (findMarks.length === 0) {
+      findCount.textContent = '0 matches';
+    } else {
+      findCount.textContent = `${findCurrent + 1}/${findMarks.length}`;
+    }
+  }
+
+  findInput.addEventListener('input', () => {
+    runFind(findInput.value);
+  });
+  findInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      if (e.shiftKey) {
+        findCurrent = (findCurrent - 1 + findMarks.length) % findMarks.length;
+      } else {
+        findCurrent = (findCurrent + 1) % findMarks.length;
+      }
+      scrollToMatch(findCurrent);
+      updateFindCount();
+    } else if (e.key === 'Escape') {
+      closeFind();
+    }
+  });
+  findNext.addEventListener('click', () => {
+    if (!findMarks.length) return;
+    findCurrent = (findCurrent + 1) % findMarks.length;
+    scrollToMatch(findCurrent);
+    updateFindCount();
+  });
+  findPrev.addEventListener('click', () => {
+    if (!findMarks.length) return;
+    findCurrent = (findCurrent - 1 + findMarks.length) % findMarks.length;
+    scrollToMatch(findCurrent);
+    updateFindCount();
+  });
+  findClose.addEventListener('click', closeFind);
+
+  // Ctrl+F / Cmd+F opens find bar.
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      e.preventDefault();
+      if (findBar.classList.contains('hidden')) {
+        openFind();
+      } else {
+        findInput.focus();
+        findInput.select();
+      }
+    }
   });
 
   // --- Init ---

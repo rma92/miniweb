@@ -6,6 +6,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/chromedp/chromedp"
 	"github.com/user/miniweb/internal/adblock"
@@ -80,6 +81,18 @@ func NewWorkerWithConfig(chromiumPath string, headless bool, cfg *config.Config)
 // Close shuts down the shared allocator.
 func (w *Worker) Close() {
 	w.allocCancel()
+}
+
+// Healthy performs a lightweight CDP round-trip to verify the Chromium process
+// is still alive and responsive. Returns false on any error or timeout.
+func (w *Worker) Healthy() bool {
+	ctx, cancel := context.WithTimeout(w.allocCtx, 5*time.Second)
+	defer cancel()
+	tabCtx, tabCancel := chromedp.NewContext(ctx)
+	defer tabCancel()
+	var result int
+	err := chromedp.Run(tabCtx, chromedp.Evaluate(`1+1`, &result))
+	return err == nil
 }
 
 // AdMatcher returns the Matcher used for ad blocking, or nil if disabled.

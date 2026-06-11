@@ -6,13 +6,15 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/user/miniweb/internal/browser"
 	"github.com/user/miniweb/internal/config"
 	"github.com/user/miniweb/internal/session"
 )
 
 type adminHandler struct {
-	mgr *session.Manager
-	cfg *config.Config
+	mgr  *session.Manager
+	cfg  *config.Config
+	pool *browser.Pool // may be nil
 }
 
 // sessions lists all active sessions across all users.
@@ -83,12 +85,16 @@ func (h *adminHandler) status(w http.ResponseWriter, r *http.Request) {
 	runtime.ReadMemStats(&mem)
 
 	all := h.mgr.ListAllSessions()
-	writeJSON(w, map[string]interface{}{
+	resp := map[string]interface{}{
 		"uptime_seconds": time.Since(startTime).Seconds(),
 		"sessions":       len(all),
 		"goroutines":     runtime.NumGoroutine(),
 		"heap_mb":        float64(mem.HeapAlloc) / 1_000_000,
-	})
+	}
+	if h.pool != nil {
+		resp["workers"] = h.pool.WorkerStats()
+	}
+	writeJSON(w, resp)
 }
 
 var startTime = time.Now()

@@ -45,7 +45,11 @@ func main() {
 		}
 		poolWorkers = append(poolWorkers, w)
 	}
-	workerPool, err := browser.NewPool(poolWorkers)
+	// Factory for replacing crashed workers.
+	workerFactory := func() (browser.PoolWorker, error) {
+		return cdpworker.NewWorkerWithConfig(cfg.Browser.ChromiumPath, cfg.Browser.Headless, cfg)
+	}
+	workerPool, err := browser.NewPoolWithFactory(poolWorkers, workerFactory)
 	if err != nil {
 		log.Fatalf("create worker pool: %v", err)
 	}
@@ -89,6 +93,9 @@ func main() {
 	defer cancel()
 	mgr := session.NewManager(ctx, workerPool, cfg)
 
+	// Start worker health monitor (checks every 30s, replaces crashed workers).
+	workerPool.StartHealthMonitor(ctx, 30*time.Second)
+
 	// Start filter list refresh loop for all workers in the pool.
 	if cfg.AdBlock.Enabled && len(cfg.AdBlock.FilterListURLs) > 0 {
 		for _, pw := range poolWorkers {
@@ -107,7 +114,7 @@ func main() {
 
 	// HTTP router.
 	webHandler := http.FileServer(http.Dir("web/"))
-	router := api.NewRouter(mgr, cfg, tokenStore, archiveStore, webHandler)
+	router := api.NewRouter(mgr, cfg, tokenStore, archiveStore, workerPool, webHandler)
 
 	srv := &http.Server{
 		Addr:         cfg.Server.ListenAddr,
